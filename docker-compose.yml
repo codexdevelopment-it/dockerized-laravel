@@ -58,7 +58,7 @@ services:
         networks:
             - sail
 
-    # Websockets
+# Websockets
 #    soketi:
 #        container_name: '${CONTAINER_NAME}-soketi'
 #        image: 'quay.io/soketi/soketi:latest-16-alpine'
@@ -70,24 +70,24 @@ services:
 #        #            - '${SOKETI_METRICS_SERVER_PORT:-9601}:9601'
 #        networks:
 #            - sail
-    meilisearch:
-        container_name: '${CONTAINER_NAME}-meilisearch'
-        image: getmeili/meilisearch:v0.25.2
-        environment:
-            #            - http_proxy
-            #            - https_proxy
-            - MEILI_MASTER_KEY=${MEILISEARCH_KEY}
-            - MEILI_NO_ANALYTICS=${MEILI_NO_ANALYTICS:-true}
-            - MEILI_ENV=${MEILI_ENV:-development}
-            - MEILI_LOG_LEVEL
-            - MEILI_DB_PATH=${MEILI_DB_PATH:-/data.ms}
-        #        ports:
-        #            - 8113:7700 # do not expose meilisearch port to the outside world
-        networks:
-            - sail
-        volumes:
-            - meilisearch-data:/data.ms
-        restart: unless-stopped
+#    meilisearch:
+#        container_name: '${CONTAINER_NAME}-meilisearch'
+#        image: getmeili/meilisearch:v0.25.2
+#        environment:
+#            #            - http_proxy
+#            #            - https_proxy
+#            - MEILI_MASTER_KEY=${MEILISEARCH_KEY}
+#            - MEILI_NO_ANALYTICS=${MEILI_NO_ANALYTICS:-true}
+#            - MEILI_ENV=${MEILI_ENV:-development}
+#            - MEILI_LOG_LEVEL
+#            - MEILI_DB_PATH=${MEILI_DB_PATH:-/data.ms}
+#        #        ports:
+#        #            - 8113:7700 # do not expose meilisearch port to the outside world
+#        networks:
+#            - sail
+#        volumes:
+#            - meilisearch-data:/data.ms
+#        restart: unless-stopped
 networks:
     sail:
         driver: bridge
