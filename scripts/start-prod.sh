@@ -25,11 +25,20 @@ docker exec -it ${CONTAINER_NAME} composer install
 # Link storage folder
 vendor/bin/sail artisan storage:link
 
+# Check that APP_KEY is set
+if [ -z "$APP_KEY" ]; then
+    echo "APP_KEY is not set, generating one"
+    vendor/bin/sail artisan key:generate
+fi
+
 # Install npm packages
+echo "Installing npm packages"
 vendor/bin/sail npm install
 
 # Compile assets
+echo "Compiling assets"
 vendor/bin/sail npm run build
+
 
 # Run the queue worker (optional)
 #vendor/bin/sail artisan queue:work --timeout=0

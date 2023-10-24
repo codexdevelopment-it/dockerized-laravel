@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y \
     zip \
     unzip
 
+# Install mysql client
+RUN apt-get install -y default-mysql-client
+
 # Install node and npm
 RUN apt-get install -y nodejs
 RUN apt-get install -y npm
