@@ -8,19 +8,21 @@ else
 fi
 
 # load .env file variables
-export $(grep -v '^#' .env | xargs)
+export "$(grep -v '^#' .env | xargs)"
 
 # Start the docker containers
 docker compose down
 docker compose up -d
 
 # Ensure working directory is owned by sail (if user sail exists)
-if id "sail" >/dev/null 2>&1; then
-    sudo chown -R sail .
-fi
+# THIS IS BETTER TO DO BEFORE STARTING THE SCRIPT (BY HAND)
+# in this way the script can be run by non-root users
+#if id "sail" >/dev/null 2>&1; then
+#    sudo chown -R sail .
+#fi
 
 # Install composer packages (read container name from environment variable)
-docker exec -it ${CONTAINER_NAME} composer install
+docker exec -it "${CONTAINER_NAME}" composer install
 
 # Link storage folder
 vendor/bin/sail artisan storage:link
