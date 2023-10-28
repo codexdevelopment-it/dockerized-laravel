@@ -1,19 +1,16 @@
-# Check that vendor directory exists
-if [ ! -d "vendor" ]; then
+# Load .env file into environment variables
+export $(grep -v '^#' .env | xargs)
 
-    # Vendor does not exist, run composer install
-    echo "Vendor directory does not exist, running composer install"
-    composer install
-fi
+# Start container
+docker compose -f docker-compose.yml -f docker-compose-local.yml  up -d
 
-# Run app
-vendor/bin/sail -f docker-compose.yml -f docker-compose-local.yml up -d
+# Install composer packages in container
+docker exec -it "${CONTAINER_NAME}" composer install
 
 # Install npm packages
 echo "Installing npm packages"
 vendor/bin/sail npm install
 
-# Compile assets
+# Compile assets and watch for changes
 echo "Compiling assets"
-vendor/bin/sail npm run build
-
+vendor/bin/sail npm run build #can be replaced with watch if add "scripts": { "watch": "vite build --watch" } to package.json

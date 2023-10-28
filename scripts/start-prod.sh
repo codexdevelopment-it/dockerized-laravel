@@ -8,7 +8,7 @@ else
 fi
 
 # load .env file variables
-export "$(grep -v '^#' .env | xargs)"
+export $(grep -v '^#' .env | xargs)
 
 # Start the docker containers
 docker compose down
