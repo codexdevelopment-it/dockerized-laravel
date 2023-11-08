@@ -3,6 +3,7 @@
 # Define your repository URL and branch (change as needed)
 REPO_URL=""
 BRANCH="master"
+PROD_ENV="/home/sail/ci-cd/XXXX/prod_env"
 
 # Define your deployment directory (change as needed)
 DEPLOY_DIR="/var/www/laravel-dockerized/sites/XXXX"
@@ -22,7 +23,7 @@ if [ -f "$DEPLOY_DIR/.env" ]; then
 fi
 
 # Copy production env file
-cp ./prod_env "$DEPLOY_DIR/.env"
+cp "$PROD_ENV" "$DEPLOY_DIR/.env"
 
 # Change to the deployment directory
 cd "$DEPLOY_DIR" || exit 1

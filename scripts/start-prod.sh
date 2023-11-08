@@ -21,16 +21,16 @@ vendor/bin/sail artisan storage:link
 # Check that APP_KEY is set
 if [ -z "$APP_KEY" ]; then
     echo "APP_KEY is not set, generating one"
-    vendor/bin/sail artisan key:generate
+    docker exec -it "${CONTAINER_NAME}" php artisan key:generate
 fi
 
 # Install npm packages
 echo "Installing npm packages"
-vendor/bin/sail npm install
+docker exec -it "${CONTAINER_NAME}" npm install
 
 # Compile assets
 echo "Compiling assets"
-vendor/bin/sail npm run build
+docker exec -it "${CONTAINER_NAME}" npm run build
 
 
 # Run the queue worker (optional)
