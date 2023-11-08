@@ -13,25 +13,25 @@ docker compose up -d
 #fi
 
 # Install composer packages (read container name from environment variable)
-docker exec -it "${CONTAINER_NAME}" composer install
+docker exec  "${CONTAINER_NAME}" composer install
 
 # Link storage folder
-vendor/bin/sail artisan storage:link
+docker exec  "${CONTAINER_NAME}" php artisan storage:link
 
 # Check that APP_KEY is set
 if [ -z "$APP_KEY" ]; then
     echo "APP_KEY is not set, generating one"
-    docker exec -it "${CONTAINER_NAME}" php artisan key:generate
+    docker exec  "${CONTAINER_NAME}" php artisan key:generate
 fi
 
 # Install npm packages
 echo "Installing npm packages"
-docker exec -it "${CONTAINER_NAME}" npm install
+docker exec "${CONTAINER_NAME}" npm install
 
 # Compile assets
 echo "Compiling assets"
-docker exec -it "${CONTAINER_NAME}" npm run build
+docker exec  "${CONTAINER_NAME}" npm run build
 
 
 # Run the queue worker (optional)
-#vendor/bin/sail artisan queue:work --timeout=0
+#docker exec  "${CONTAINER_NAME}" php artisan queue:work --timeout=0
