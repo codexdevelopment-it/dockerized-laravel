@@ -1,12 +1,3 @@
-# Check if .env.prod exists
-if [ ! -f .env.prod ]; then
-    echo "skipping prod env file (.env.prod does not exist)"
-else
-    # Copy .env.prod to .env
-    rm .env
-    cp .env.prod .env
-fi
-
 # load .env file variables
 export $(grep -v '^#' .env | xargs)
 
