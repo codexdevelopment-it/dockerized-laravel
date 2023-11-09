@@ -17,6 +17,9 @@ git clone -b "$BRANCH" "$REPO_URL" "$TMP_DIR"
 # Perform rsync to update the deployment directory NOTE THE / AT THE END MEANS TO COPY ALL FILES FROM DIR AND NOT THE DIR
 rsync -av --delete "$TMP_DIR/" "$DEPLOY_DIR"
 
+# Give permission to deploy directory
+chmod -R 755 "$DEPLOY_DIR"
+
 # Remove (if exists) the .env file from the deployment directory (backup it first)
 if [ -f "$DEPLOY_DIR/.env" ]; then
     mv "$DEPLOY_DIR/.env" "$DEPLOY_DIR/.env.bak"
