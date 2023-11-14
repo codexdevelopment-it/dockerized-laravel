@@ -5,3 +5,6 @@ services:
   mariadb:
     volumes:
       - '${STORAGE_DB_MOUNT_PATH}:/var/lib/mysql'
+  nginx:
+    volumes:
+      - '${STORAGE_MOUNT_PATH}:/var/www/storage'
