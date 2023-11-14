@@ -3,7 +3,7 @@ export $(grep -v '^#' .env | xargs)
 
 # Start the docker containers
 docker compose down
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose-prod.yml  up -d
 
 # Ensure working directory is owned by sail (if user sail exists)
 # THIS IS BETTER TO DO BEFORE STARTING THE SCRIPT (BY HAND)
