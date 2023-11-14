@@ -1,0 +1,4 @@
+services:
+  app:
+    volumes:
+      - '${STORAGE_CONTAINER_MOUNT_PATH}:/var/www/storage'
