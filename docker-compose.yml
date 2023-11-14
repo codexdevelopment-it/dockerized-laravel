@@ -42,8 +42,6 @@ services:
             MYSQL_DATABASE: '${DB_DATABASE}'
             MYSQL_USER: '${DB_USERNAME}'
             MYSQL_PASSWORD: '${DB_PASSWORD}'
-        volumes:
-            - 'sail-mariadb:/var/lib/mysql'
         networks:
             - sail
         healthcheck:
@@ -64,6 +62,3 @@ services:
 networks:
     sail:
         driver: bridge
-volumes:
-    sail-mariadb:
-        driver: local

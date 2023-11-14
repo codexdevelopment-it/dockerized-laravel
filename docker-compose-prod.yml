@@ -2,3 +2,6 @@ services:
   app:
     volumes:
       - '${STORAGE_CONTAINER_MOUNT_PATH}:/var/www/storage'
+  mariadb:
+    volumes:
+      - '${STORAGE_DB_MOUNT_PATH}:/var/lib/mysql'
