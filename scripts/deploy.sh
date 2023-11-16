@@ -14,6 +14,12 @@ TMP_DIR=$(mktemp -d)
 # Clone the repository into the temporary directory
 git clone -b "$BRANCH" "$REPO_URL" "$TMP_DIR"
 
+# If cloning fails, stop the script
+if [ $? -ne 0 ]; then
+    echo "Error cloning repository"
+    exit 1
+fi
+
 # Perform rsync to update the deployment directory NOTE THE / AT THE END MEANS TO COPY ALL FILES FROM DIR AND NOT THE DIR
 rsync -av --delete "$TMP_DIR/" "$DEPLOY_DIR"
 
