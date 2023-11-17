@@ -17,6 +17,7 @@ docker exec "${CONTAINER_NAME}" chmod 775 /var/www
 docker exec "${CONTAINER_NAME}" chmod -R 775 public
 
 # Ensure storage public folder is readable and future created files will be readable
+# Ensure storage public folder is readable and future created files will be readable
 docker exec "${CONTAINER_NAME}" chmod +x /var/www
 docker exec "${CONTAINER_NAME}" chmod +x /var/www/storage
 docker exec "${CONTAINER_NAME}" mkdir -p /var/www/storage/app
@@ -56,3 +57,6 @@ docker exec "${CONTAINER_NAME}" npm install
 # Compile assets
 echo "Compiling assets"
 docker exec  "${CONTAINER_NAME}" npm run build
+
+# Run the queue worker (optional)
+#docker exec  "${CONTAINER_NAME}" php artisan queue:work --timeout=0
