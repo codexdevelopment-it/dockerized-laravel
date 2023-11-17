@@ -11,10 +11,10 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libonig-dev \
     libxml2-dev \
-    libjpeg-dev \
-    libfreetype6-dev \
     zip \
-    unzip
+    unzip \
+    procps \
+    acl \
 
 # Install mysql client
 RUN apt-get install -y default-mysql-client

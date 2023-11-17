@@ -18,6 +18,12 @@ docker exec  "${CONTAINER_NAME}" composer install
 # Link storage folder
 docker exec  "${CONTAINER_NAME}" php artisan storage:link
 
+# Set default permissions for storage public folder (always read for everyone) with ACL
+# Not that capital X means execute only if it is a directory or already has execute permission for some user
+# The X for directories is very useful to ensure that new files and directories created there will be accessible
+docker exec  "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX /var/www/storage/app/public/
+
+
 # Check that APP_KEY is set
 if [ -z "$APP_KEY" ]; then
     echo "APP_KEY is not set, generating one"

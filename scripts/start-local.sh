@@ -9,8 +9,8 @@ docker exec -it "${CONTAINER_NAME}" composer install
 
 # Install npm packages
 echo "Installing npm packages"
-vendor/bin/sail npm install
+docker exec -it "${CONTAINER_NAME}" npm install
 
 # Compile assets and watch for changes
 echo "Compiling assets"
-vendor/bin/sail npm run build #can be replaced with watch if add "scripts": { "watch": "vite build --watch" } to package.json
+docker exec -it "${CONTAINER_NAME}" npm run build #can be replaced with watch if add "scripts": { "watch": "vite build --watch" } to package.json
