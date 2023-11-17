@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     zip \
     unzip \
     procps \
-    acl \
+    acl
 
 # Install mysql client
 RUN apt-get install -y default-mysql-client
