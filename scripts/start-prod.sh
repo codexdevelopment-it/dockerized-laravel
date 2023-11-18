@@ -15,6 +15,7 @@ docker exec "${CONTAINER_NAME}" chmod 775 /var/www
 
 # Ensure public folder is readable
 docker exec "${CONTAINER_NAME}" chmod -R 775 public
+docker exec "${CONTAINER_NAME}" bash -c "setfacl -R -m d:u::rwx,d:g::rwx,d:o::rX /var/www/public"
 
 # Ensure storage public folder is readable and future created files will be readable
 # Ensure storage public folder is readable and future created files will be readable
