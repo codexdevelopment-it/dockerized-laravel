@@ -21,10 +21,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Perform rsync to update the deployment directory NOTE THE / AT THE END MEANS TO COPY ALL FILES FROM DIR AND NOT THE DIR
-rsync -av --delete "$TMP_DIR/" "$DEPLOY_DIR"
-
-# Give permission to deploy directory
-chmod -R 755 "$DEPLOY_DIR"
+rsync -av --no-perms --no-owner --no-group --delete "$TMP_DIR/" "$DEPLOY_DIR"
 
 # Remove (if exists) the .env file from the deployment directory (backup it first)
 if [ -f "$DEPLOY_DIR/.env" ]; then
@@ -36,6 +33,9 @@ cp "$PROD_ENV" "$DEPLOY_DIR/.env"
 
 # Change to the deployment directory
 cd "$DEPLOY_DIR" || exit 1
+
+# Set permission on published dir
+chmod -R 770 "$DEPLOY_DIR"
 
 # Run start script (add error handling if needed)
 ./scripts/start-prod.sh
