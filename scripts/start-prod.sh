@@ -35,7 +35,7 @@ docker exec "${CONTAINER_NAME}" bash -c "setfacl -Rm d:u::rwx,d:g::rwx,d:o::rX /
 #fi
 
 # Install composer packages (read container name from environment variable)
-docker exec  "${CONTAINER_NAME}" composer install
+docker exec  "${CONTAINER_NAME}" composer install --optimize-autoloader --no-dev
 
 # Link storage folder
 docker exec  "${CONTAINER_NAME}" php artisan storage:link
