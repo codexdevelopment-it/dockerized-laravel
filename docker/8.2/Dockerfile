@@ -56,6 +56,9 @@ RUN rm /usr/local/etc/php/php.ini*
 # Copy modified php.ini
 COPY php.ini /usr/local/etc/php/
 
+# Add read permission to everyone for php.ini
+RUN chmod a+r /usr/local/etc/php/php.ini
+
 # Add user with sail name (to use Laravel Sail)
 RUN useradd -m -g www-data sail --uid 1001
 
