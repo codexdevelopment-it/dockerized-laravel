@@ -42,3 +42,12 @@ chmod -R 770 "$DEPLOY_DIR"
 
 # Clean up temporary directory
 rm -rf "$TMP_DIR"
+
+# Optional, run sonarqube analysis
+#docker run \
+#    --rm \
+#    -e SONAR_HOST_URL="https://" \
+#    -e SONAR_SCANNER_OPTS="-Dsonar.projectKey=NAME" \
+#    -e SONAR_TOKEN="" \
+#    -v "./:/usr/src" \
+#    sonarsource/sonar-scanner-cli
