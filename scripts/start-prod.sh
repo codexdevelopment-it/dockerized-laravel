@@ -59,5 +59,9 @@ docker exec "${CONTAINER_NAME}" npm install
 echo "Compiling assets"
 docker exec  "${CONTAINER_NAME}" npm run build
 
+# Optimize
+echo "Optimizing"
+docker exec  "${CONTAINER_NAME}" php artisan optimize
+
 # Run the queue worker (optional)
 #docker exec  "${CONTAINER_NAME}" php artisan queue:work --timeout=0
