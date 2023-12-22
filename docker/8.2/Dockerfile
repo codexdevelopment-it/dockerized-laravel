@@ -35,7 +35,7 @@ RUN apt-get install -y npm
 #RUN apt-get update && apt-get install -y poppler-utils
 
 # Install ocrmypdf for OCR
-RUN apt install ocrmypdf -y
+#RUN apt install ocrmypdf -y
 
 # Clear cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
