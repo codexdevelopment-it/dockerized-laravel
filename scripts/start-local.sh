@@ -1,3 +1,11 @@
+# Load .env file
+export $(cat .env | grep -v ^# | xargs)
+
+# Ensure right permissions in project
+echo "We need password to set permissions to write in local, just in case"
+sudo chmod -R 777 .
+
+
 # Load .env file into environment variables
 export $(grep -v '^#' .env | xargs)
 
