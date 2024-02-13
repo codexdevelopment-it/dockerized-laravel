@@ -1,6 +1,7 @@
 # Remove previous dockerized-laravel directory
 rm -rf dockerized-laravel
 
+
 # Ask user for app name
 echo "Enter the name of the app"
 read -r APP_NAME
