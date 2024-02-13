@@ -8,6 +8,7 @@ services:
       MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
     volumes:
       - 'sail-mariadb:/var/lib/mysql'
+
   # Websockets
   soketi:
     environment:
@@ -15,6 +16,7 @@ services:
       SOKETI_METRICS_SERVER_PORT: '9601'
     ports:
       - '${SOKETI_METRICS_SERVER_PORT:-9601}:9601'
+
 volumes:
   sail-mariadb:
     driver: local
