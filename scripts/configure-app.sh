@@ -11,13 +11,11 @@ echo "Enter the name of the database"
 read -r DB_NAME
 
 # Clone this repo inside project root directory
-mkdir -p dockerized-config
-cd dockerized-config || exit
 git clone https://github.com/Murkrow02/dockerized-laravel
+cd dockerized-laravel || exit
 #cp -r /Users/murkrow/Desktop/Repos/dockerized-laravel ./
 
 # Replace .env values with user input
-cd dockerized-laravel || exit
 # Check if the operating system is macOS
 if [[ $(uname) == "Darwin" ]]; then
     sed -i '' "s/{{APP_NAME}}/$APP_NAME/g" .env
@@ -31,7 +29,7 @@ fi
 
 
 # Copy the .env file to the root directory of the project
-mv .env ../.env.old
+mv .env ../.env.old || true
 cp .env ../.env
 
 # Copy the docker-compose files to the root directory of the project
