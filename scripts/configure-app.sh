@@ -31,7 +31,6 @@ else
     sed -i "s/{{DB_NAME}}/$DB_NAME/g" .env
 fi
 
-
 # Copy the .env file to the root directory of the project
 mv ../.env ../.env.old || true
 cp .env ../.env
@@ -40,6 +39,9 @@ cp .env ../.env
 cp docker-compose.yml ../docker-compose.yml
 cp docker-compose-local.yml ../docker-compose-local.yml
 cp docker-compose-prod.yml ../docker-compose-prod.yml
+
+# Copy docker folder
+cp -r docker ../docker
 
 # Copy the scripts to the root directory of the project excluding the configure-app.sh file
 cp -r scripts ../scripts && rm -f ../scripts/configure-app.sh
