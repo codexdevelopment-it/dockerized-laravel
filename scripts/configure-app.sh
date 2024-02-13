@@ -50,5 +50,5 @@ rm -rf dockerized-laravel
 # Install packages
 cd ..
 composer require laravel/octane
-php artisan octane:install
+php artisan octane:install --server=frankenphp
 
