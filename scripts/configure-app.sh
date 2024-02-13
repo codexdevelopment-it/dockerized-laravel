@@ -44,6 +44,11 @@ cp docker-compose-prod.yml ../docker-compose-prod.yml
 # Copy the scripts to the root directory of the project excluding the configure-app.sh file
 cp -r scripts ../scripts && rm -f ../scripts/configure-app.sh
 
-# Clean up
-cd ..
+# Remove the dockerized-laravel directory
 rm -rf dockerized-laravel
+
+# Install packages
+cd ..
+composer require laravel/octane
+php artisan octane:install
+
