@@ -50,19 +50,12 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 #RUN rm /etc/ImageMagick-6/policy.xml
 #COPY image-magick-policy.xml /etc/ImageMagick-6/policy.xml
 
-# Remove original php.ini (for larger file uploads)
+# Remove original php.ini (for larger file uploads) and copy our own
 RUN rm /usr/local/etc/php/php.ini*
-
-# Copy modified php.ini
 COPY php.ini /usr/local/etc/php/
-
-# Add read permission to everyone for php.ini
 RUN chmod a+r /usr/local/etc/php/php.ini
 
 # Add user with sail name (to use Laravel Sail)
 RUN useradd -m -g www-data sail --uid 1001
-
-# Change ownership of /var/www to sail
-RUN chown -R sail /var/www
 
 USER sail
