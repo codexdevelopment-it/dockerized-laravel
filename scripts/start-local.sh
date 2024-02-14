@@ -23,3 +23,8 @@ docker exec -it "${CONTAINER_NAME}" npm install
 # Compile assets and watch for changes
 echo "Compiling assets"
 docker exec -it "${CONTAINER_NAME}" npm run build #can be replaced with watch if add "scripts": { "watch": "vite build --watch" } to package.json
+
+# Start the server
+echo "Starting the server"
+docker exec -it "${CONTAINER_NAME}" php -d variables_order=EGPCS \
+                                        /var/www/artisan serve --host=0.0.0.0 --port=80

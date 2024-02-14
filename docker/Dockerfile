@@ -35,10 +35,5 @@ RUN chmod a+r /usr/local/etc/php/php.ini
 RUN adduser -S sail -G www-data --uid 1001
 USER sail
 
-# Start Octane server
-CMD php -d variables_order=EGPCS \
-    /var/www/artisan octane:start \
-    --server=frankenphp \
-    --host=0.0.0.0 \
-    --admin-port=2019 \
-    --port=80
+# Leave the container running
+ENTRYPOINT ["tail", "-f", "/dev/null"]

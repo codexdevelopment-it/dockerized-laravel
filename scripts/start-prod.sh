@@ -65,3 +65,12 @@ docker exec  "${CONTAINER_NAME}" npm run build
 
 # Run the queue worker (optional)
 #docker exec  "${CONTAINER_NAME}" php artisan queue:work --timeout=0
+
+# Start the server
+echo "Starting the Octane server"
+docker exec -it "${CONTAINER_NAME}" php -d variables_order=EGPCS \
+                                        /var/www/artisan octane:start \
+                                        --server=frankenphp \
+                                        --host=0.0.0.0 \
+                                        --admin-port=2019 \
+                                        --port=80

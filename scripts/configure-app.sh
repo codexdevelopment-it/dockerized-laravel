@@ -51,6 +51,10 @@ rm -rf dockerized-laravel
 
 # Install packages
 cd ..
+php artisan key:generate
 composer require laravel/octane
 php artisan octane:install --server=frankenphp
+
+# Remove frankenphp file (this needs to be downloaded again from container for architecture)
+rm -f frankenphp
 
