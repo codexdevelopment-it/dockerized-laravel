@@ -13,6 +13,7 @@ services:
         environment:
             LARAVEL_SAIL: 1
             IGNITION_LOCAL_SITES_PATH: '${PWD}'
+            TZ: "Europe/Rome"
         volumes:
             - '.:/var/www/'
         networks:
@@ -28,6 +29,7 @@ services:
             MYSQL_DATABASE: '${DB_DATABASE}'
             MYSQL_USER: '${DB_USERNAME}'
             MYSQL_PASSWORD: '${DB_PASSWORD}'
+            TZ: "Europe/Rome"
         networks:
             - sail
         healthcheck:
@@ -39,12 +41,14 @@ services:
             retries: 3
             timeout: 5s
 
-    # Websockets
-    soketi:
-        container_name: '${CONTAINER_NAME}-soketi'
-        image: 'quay.io/soketi/soketi:latest-16-alpine'
-        networks:
-            - sail
+#    # Websockets
+#    soketi:
+#        container_name: '${CONTAINER_NAME}-soketi'
+#        image: 'quay.io/soketi/soketi:latest-16-alpine'
+#        environment:
+#            - TZ=Europe/Rome
+#        networks:
+#            - sail
 networks:
     sail:
         driver: bridge

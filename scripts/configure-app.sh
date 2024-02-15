@@ -46,8 +46,7 @@ cp -r docker ../docker
 # Copy the scripts to the root directory of the project excluding the configure-app.sh file
 cp -r scripts ../scripts && rm -f ../scripts/configure-app.sh
 
-# Remove the dockerized-laravel directory
-rm -rf dockerized-laravel
+
 
 # Install packages
 cd ..
@@ -57,4 +56,6 @@ php artisan octane:install --server=frankenphp
 
 # Remove frankenphp file (this needs to be downloaded again from container for architecture)
 rm -f frankenphp
+# Remove the dockerized-laravel directory
+rm -rf dockerized-laravel
 

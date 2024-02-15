@@ -68,7 +68,7 @@ docker exec  "${CONTAINER_NAME}" npm run build
 
 # Start the server
 echo "Starting the Octane server"
-docker exec -it "${CONTAINER_NAME}" php -d variables_order=EGPCS \
+docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
                                         /var/www/artisan octane:start \
                                         --server=frankenphp \
                                         --host=0.0.0.0 \
