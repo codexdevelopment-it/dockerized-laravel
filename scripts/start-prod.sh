@@ -1,11 +1,12 @@
 # load .env file variables
 export $(grep -v '^#' .env | xargs)
+export COMPOSE_PROJECT_NAME="${CONTAINER_NAME}"
 
 # Check if fpm or octane argument is passed
 if [ "$1" = "fpm" ]; then
-    CONTAINER_NAME="${PROJECT_NAME}_fpm"
+    echo "Using fpm"
 elif [ "$1" = "octane" ]; then
-    CONTAINER_NAME="${PROJECT_NAME}_octane"
+    echo "Using octane"
 else
     echo "Please specify fpm or octane as an argument"
     exit 1
@@ -17,9 +18,9 @@ docker compose down
 
 # Start the docker containers (if fpm is passed, use fpm docker-compose file, otherwise use octane file)
 if [ "$1" = "fpm" ]; then
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-fpm.yml up -d
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml up -d
 else
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-octane.yml up -d
 fi
 
 # Ensure framework folders exist
@@ -91,6 +92,6 @@ if [ "$1" = "octane" ]; then
                                             --server=frankenphp \
                                             --host=0.0.0.0 \
                                             --admin-port=2019 \
-                                            --port="${APP_PORT}"
+                                            --port=80
 fi
 

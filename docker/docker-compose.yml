@@ -7,14 +7,12 @@ services:
             dockerfile: Dockerfile
         image: '${CONTAINER_NAME}'
         working_dir: /var/www
-        ports:
-            - '${APP_PORT:-8000}:80'
         environment:
             LARAVEL_SAIL: 1
             IGNITION_LOCAL_SITES_PATH: '${PWD}'
             TZ: "Europe/Rome"
         volumes:
-            - '.:/var/www/'
+            - '../:/var/www/'
         networks:
             - sail
 

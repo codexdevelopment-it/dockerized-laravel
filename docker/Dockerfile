@@ -17,6 +17,9 @@ RUN apk update && apk add \
     nodejs \
     npm
 
+# Install bash
+RUN apk add --no-cache bash
+
 # Clear package cache
 RUN rm -rf /var/cache/apk/*
 
