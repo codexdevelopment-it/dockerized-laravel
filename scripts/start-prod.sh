@@ -1,9 +1,26 @@
 # load .env file variables
 export $(grep -v '^#' .env | xargs)
 
-# Start the docker containers
+# Check if fpm or octane argument is passed
+if [ "$1" = "fpm" ]; then
+    CONTAINER_NAME="${PROJECT_NAME}_fpm"
+elif [ "$1" = "octane" ]; then
+    CONTAINER_NAME="${PROJECT_NAME}_octane"
+else
+    echo "Please specify fpm or octane as an argument"
+    exit 1
+fi
+
+# Stop the docker containers
+cd docker || exit
 docker compose down
-docker compose -f docker-compose.yml -f docker-compose-prod.yml  up -d
+
+# Start the docker containers (if fpm is passed, use fpm docker-compose file, otherwise use octane file)
+if [ "$1" = "fpm" ]; then
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-fpm.yml up -d
+else
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml
+fi
 
 # Ensure framework folders exist
 docker exec "${CONTAINER_NAME}" mkdir -p /var/www/storage/framework/sessions
@@ -67,10 +84,13 @@ docker exec  "${CONTAINER_NAME}" npm run build
 #docker exec  "${CONTAINER_NAME}" php artisan queue:work --timeout=0
 
 # Start the server
-echo "Starting the Octane server"
-docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
-                                        /var/www/artisan octane:start \
-                                        --server=frankenphp \
-                                        --host=0.0.0.0 \
-                                        --admin-port=2019 \
-                                        --port=80
+if [ "$1" = "octane" ]; then
+    echo "Starting the Octane server"
+    docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
+                                            /var/www/artisan octane:start \
+                                            --server=frankenphp \
+                                            --host=0.0.0.0 \
+                                            --admin-port=2019 \
+                                            --port="${APP_PORT}"
+fi
+

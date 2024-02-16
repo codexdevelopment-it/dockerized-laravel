@@ -1,4 +1,4 @@
-FROM php:8.3-alpine
+FROM php:8.3-fpm-alpine
 
 # Install system dependencies
 RUN apk update && apk add \

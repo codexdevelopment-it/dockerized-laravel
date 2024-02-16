@@ -1,7 +1,6 @@
 # Remove previous dockerized-laravel directory
 rm -rf dockerized-laravel
 
-
 # Ask user for app name
 echo "Enter the name of the app"
 read -r APP_NAME
@@ -35,18 +34,11 @@ fi
 mv ../.env ../.env.old || true
 cp .env ../.env
 
-# Copy the docker-compose files to the root directory of the project
-cp docker-compose.yml ../docker-compose.yml
-cp docker-compose-local.yml ../docker-compose-local.yml
-cp docker-compose-prod.yml ../docker-compose-prod.yml
-
 # Copy docker folder
 cp -r docker ../docker
 
 # Copy the scripts to the root directory of the project excluding the configure-app.sh file
 cp -r scripts ../scripts && rm -f ../scripts/configure-app.sh
-
-
 
 # Install packages
 cd ..

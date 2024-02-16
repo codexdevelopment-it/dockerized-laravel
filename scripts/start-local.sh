@@ -10,6 +10,7 @@ sudo chmod -R 777 .
 export $(grep -v '^#' .env | xargs)
 
 # Start container
+cd docker || exit
 docker compose down
 docker compose -f docker-compose.yml -f docker-compose-local.yml  up -d
 
