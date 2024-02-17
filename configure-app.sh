@@ -37,6 +37,9 @@ cp .env ../.env
 # Copy docker folder
 cp -r docker ../docker
 
+# Copy compose files
+cp docker-compose/* ../
+
 # Copy the scripts to the root directory of the project excluding the configure-app.sh file
 cp -r scripts ../scripts
 

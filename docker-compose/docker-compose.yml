@@ -4,7 +4,7 @@ services:
     app:
         container_name: '${CONTAINER_NAME}'
         build:
-            dockerfile: Dockerfile
+            dockerfile: ../docker/Dockerfile
         image: '${CONTAINER_NAME}'
         working_dir: /var/www
         environment:

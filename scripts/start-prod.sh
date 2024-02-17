@@ -13,10 +13,9 @@ else
 fi
 
 # Stop the docker containers
-cd docker || exit
 docker compose down
 
-# Start the docker containers (if fpm is passed, use fpm docker-compose file, otherwise use octane file)
+# Start the docker containers (if fpm is passed, use fpm docker-docker-compose file, otherwise use octane file)
 if [ "$1" = "fpm" ]; then
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml up -d
 else
