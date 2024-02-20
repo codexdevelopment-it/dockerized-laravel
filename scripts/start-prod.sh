@@ -7,8 +7,10 @@ if [ "$1" = "fpm" ]; then
     echo "Using fpm"
 elif [ "$1" = "octane" ]; then
     echo "Using octane"
+elif [ "$1" = "fpm-caddy" ]; then
+    echo "Using fpm + caddy https webserver"
 else
-    echo "Please specify fpm or octane as an argument"
+    echo "Please specify fpm, fpm-caddy or octane as an argument"
     exit 1
 fi
 
@@ -18,6 +20,8 @@ docker compose down
 # Start the docker containers (if fpm is passed, use fpm docker-docker-compose file, otherwise use octane file)
 if [ "$1" = "fpm" ]; then
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml up -d
+elif [ "$1" = "fpm-caddy" ]; then
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml -f docker-compose-prod-caddy.yml up -d
 else
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-octane.yml up -d
 fi
