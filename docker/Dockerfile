@@ -36,10 +36,4 @@ RUN chmod a+r /usr/local/etc/php/php.ini
 
 # Add user with sail name (to use Laravel Sail)
 RUN adduser -S sail -G www-data --uid 1001
-
-# Change ownership of /var/www to sail
-RUN chown -R sail /var/www
 USER sail
-
-# Leave the container running
-ENTRYPOINT ["tail", "-f", "/dev/null"]
