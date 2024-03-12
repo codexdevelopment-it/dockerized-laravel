@@ -2,9 +2,11 @@
 export $(cat .env | grep -v ^# | xargs)
 export COMPOSE_PROJECT_NAME="${CONTAINER_NAME}"
 
-# Ensure right permissions in project
-echo "We need password to set permissions to write in local, just in case"
-sudo chmod -R 777 .
+# Ensure right permissions in project if windows
+if [[ "$OSTYPE" == "msys" ]]; then
+    echo "We need password to set permissions to write in local, just in case"
+    sudo chmod -R 777 .
+fi
 
 # Load .env file into environment variables
 export $(grep -v '^#' .env | xargs)
