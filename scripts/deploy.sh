@@ -12,7 +12,7 @@ DEPLOY_DIR="/var/www/laravel-dockerized/sites/XXXX"
 TMP_DIR=$(mktemp -d)
 
 # Clone the repository into the temporary directory
-git clone -b "$BRANCH" "$REPO_URL" "$TMP_DIR"
+git clone --depth 1 -b "$BRANCH" "$REPO_URL" "$TMP_DIR"
 
 # If cloning fails, stop the script
 if [ $? -ne 0 ]; then
