@@ -22,8 +22,9 @@ else
     # Install composer packages in container
     docker exec -it "${CONTAINER_NAME}" composer install
 
-    # Set application key
-    docker exec -it "${CONTAINER_NAME}" php artisan key:generate
+    #    # Set application key if not set
+    #    echo "Setting application key"
+    #    docker exec -it "${CONTAINER_NAME}" php artisan key:generate
 
     # Install npm packages
     echo "Installing npm packages"
