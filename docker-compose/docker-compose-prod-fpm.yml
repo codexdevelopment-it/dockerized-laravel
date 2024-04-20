@@ -1,4 +1,0 @@
-services:
-  app:
-    volumes:
-      - './docker/fpm.conf:/usr/local/etc/php-fpm.d/zz-docker.conf'

@@ -1,5 +1,9 @@
 services:
 
+  # Publish the configuration for php fpm
+  app:
+    volumes:
+      - './docker/fpm.conf:/usr/local/etc/php-fpm.d/zz-docker.conf'
   # Proxy server
   caddy:
     image: caddy:latest

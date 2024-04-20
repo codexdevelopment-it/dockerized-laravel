@@ -3,14 +3,17 @@ export $(grep -v '^#' .env | xargs)
 export COMPOSE_PROJECT_NAME="${CONTAINER_NAME}"
 
 # Check if fpm or octane argument is passed
-if [ "$1" = "fpm" ]; then
-    echo "Using fpm"
+if [ "$1" = "nginx" ]; then
+    echo "Using nginx"
 elif [ "$1" = "octane" ]; then
     echo "Using octane"
-elif [ "$1" = "fpm-caddy" ]; then
-    echo "Using fpm + caddy https webserver"
+elif [ "$1" = "caddy-standalone" ]; then
+    echo "Using caddy-standalone"
 else
     echo "Please specify fpm, fpm-caddy or octane as an argument"
+    echo "Octane: high performance Laravel server, needs to be reverse proxied by a webserver"
+    echo "Caddy-standalone: Caddy webserver with PHP-FPM, no need for reverse proxy, automatic HTTPS, useful for machines with single webserver"
+    echo "Nginx: Nginx webserver with PHP-FPM, needs reverse proxy for HTTPS"
     exit 1
 fi
 
@@ -20,8 +23,8 @@ docker compose down
 # Start the docker containers (if fpm is passed, use fpm docker-docker-compose file, otherwise use octane file)
 if [ "$1" = "fpm" ]; then
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml up -d
-elif [ "$1" = "fpm-caddy" ]; then
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml -f docker-compose-prod-caddy.yml up -d
+elif [ "$1" = "caddy-standalone" ]; then
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-caddy.yml up -d
 else
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-octane.yml up -d
 fi
