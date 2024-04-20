@@ -21,11 +21,11 @@ fi
 docker compose down
 
 # Start the docker containers (if fpm is passed, use fpm docker-docker-compose file, otherwise use octane file)
-if [ "$1" = "fpm" ]; then
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml up -d
-elif [ "$1" = "caddy-standalone" ]; then
+if [ "$1" = "caddy-standalone" ]; then
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-caddy.yml up -d
-else
+elif [ "$1" = "nginx" ]; then
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-nginx.yml up -d
+elif [ "$1" = "octane" ]; then
     docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-octane.yml up -d
 fi
 
