@@ -11,7 +11,6 @@ services:
         environment:
             LARAVEL_SAIL: 1
             IGNITION_LOCAL_SITES_PATH: '${PWD}'
-            TZ: "Europe/Rome"
         volumes:
             - './:/var/www/'
         networks:

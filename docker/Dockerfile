@@ -15,10 +15,14 @@ RUN apk update && apk add \
     procps \
     acl \
     nodejs \
-    npm
+    npm \
+    tzdata
 
 # Install bash
 RUN apk add --no-cache bash
+
+# Set timezone
+RUN cp /usr/share/zoneinfo/Europe/Rome /etc/localtime
 
 # Clear package cache
 RUN rm -rf /var/cache/apk/*
