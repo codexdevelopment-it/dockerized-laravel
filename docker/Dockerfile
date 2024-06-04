@@ -15,8 +15,10 @@ RUN apk update && apk add \
     procps \
     acl \
     nodejs \
-    npm \
-    tzdata
+    libwebp-dev \
+    jpeg-dev \
+    tzdata \
+    npm
 
 # Install bash
 RUN apk add --no-cache bash
@@ -28,6 +30,7 @@ RUN cp /usr/share/zoneinfo/Europe/Rome /etc/localtime
 RUN rm -rf /var/cache/apk/*
 
 # Install PHP extensions
+RUN docker-php-ext-configure gd --with-webp  --with-jpeg;
 RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd intl zip
 
 # Get latest Composer
