@@ -1,13 +1,11 @@
 services:
 
-  # Publish the configuration for php fpm
-  app:
-    volumes:
-      - './docker/fpm.conf:/usr/local/etc/php-fpm.d/zz-docker.conf'
   # Proxy server
   caddy:
     image: caddy:latest
     container_name: '${CONTAINER_NAME}-caddy'
+    networks:
+      - sail
     ports:
       - '${APP_PORT}:80'
       - "443:443"

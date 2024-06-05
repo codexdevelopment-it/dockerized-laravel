@@ -4,29 +4,28 @@ export COMPOSE_PROJECT_NAME="${CONTAINER_NAME}"
 
 # Check if fpm or octane argument is passed
 if [ "$1" = "nginx" ]; then
+    echo "NOT IMPLEMENTED YET"
+    exit 1
     echo "Using nginx"
 elif [ "$1" = "octane" ]; then
     echo "Using octane"
 elif [ "$1" = "caddy-standalone" ]; then
     echo "Using caddy-standalone"
 else
-    echo "Please specify fpm, fpm-caddy or octane as an argument"
-    echo "Octane: high performance Laravel server, needs to be reverse proxied by a webserver"
-    echo "Caddy-standalone: Caddy webserver with PHP-FPM, no need for reverse proxy, automatic HTTPS, useful for machines with single webserver"
-    echo "Nginx: Nginx webserver with PHP-FPM, needs reverse proxy for HTTPS"
+    echo "Usage: $0 <nginx|octane|caddy-standalone>"
+    echo "  nginx: use nginx as web server, need a global web server to handle https"
+    echo "  octane: use octane as web server, need a global web server to handle https"
+    echo "  caddy-standalone: use caddy as web server, caddy will automatically handle https"
     exit 1
 fi
 
-# Stop the docker containers
-docker compose down
-
 # Start the docker containers (if fpm is passed, use fpm docker-docker-compose file, otherwise use octane file)
 if [ "$1" = "caddy-standalone" ]; then
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-caddy.yml up -d
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-fpm.yml -f docker-compose-prod-caddy.yml up -d --remove-orphans --force-recreate
 elif [ "$1" = "nginx" ]; then
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-nginx.yml up -d
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-nginx.yml up -d --remove-orphans --force-recreate
 elif [ "$1" = "octane" ]; then
-    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-octane.yml up -d
+    docker compose -f docker-compose.yml -f docker-compose-prod.yml -f docker-compose-prod-octane.yml up -d --remove-orphans --force-recreate
 fi
 
 # Ensure framework folders exist
@@ -41,7 +40,6 @@ docker exec "${CONTAINER_NAME}" chmod 775 /var/www
 docker exec "${CONTAINER_NAME}" chmod -R 775 public
 docker exec "${CONTAINER_NAME}" bash -c "setfacl -R -m d:u::rwx,d:g::rwx,d:o::rX /var/www/public"
 
-# Ensure storage public folder is readable and future created files will be readable
 # Ensure storage public folder is readable and future created files will be readable
 docker exec "${CONTAINER_NAME}" chmod +x /var/www
 docker exec "${CONTAINER_NAME}" chmod +x /var/www/storage
