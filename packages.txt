@@ -1,2 +1,0 @@
-sail composer require laravel/pail
-sail composer require laravel/pulse

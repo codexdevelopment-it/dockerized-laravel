@@ -38,7 +38,7 @@ cd "$DEPLOY_DIR" || exit 1
 chmod -R 770 "$DEPLOY_DIR"
 
 # Run start script (add error handling if needed)
-./scripts/start-prod.sh
+#./scripts/start.sh --server caddy --services mailpit
 
 # Clean up temporary directory
 rm -rf "$TMP_DIR"

@@ -41,6 +41,10 @@ RUN rm /usr/local/etc/php/php.ini*
 COPY php.ini /usr/local/etc/php/
 RUN chmod a+r /usr/local/etc/php/php.ini
 
-# Add user with sail name (to use Laravel Sail)
-RUN adduser -S sail -G www-data --uid 1001
-USER sail
+# Add user which runs the app
+RUN adduser -S laravel -G www-data --uid 1000
+
+# Ownership of the Laravel app
+RUN chown -R 1001:www-data /var/www
+
+USER laravel

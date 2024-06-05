@@ -1,4 +1,0 @@
-services:
-  app:
-    ports:
-      - '${APP_PORT:-8000}:80'
