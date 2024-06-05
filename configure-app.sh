@@ -23,15 +23,14 @@ cd dockerized-laravel || exit
 
 # Sed works differently on Mac and Linux
 if [[ $(uname) == "Darwin" ]]; then
-    SED_SUFFIX="''"
+    sed -i '' "s/{{APP_NAME}}/$APP_NAME/g" .env
+    sed -i '' "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
+    sed -i '' "s/{{DB_NAME}}/$DB_NAME/g" .env
 else
-    SED_SUFFIX=""
+    sed -i "s/{{APP_NAME}}/$APP_NAME/g" .env
+    sed -i "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
+    sed -i "s/{{DB_NAME}}/$DB_NAME/g" .env
 fi
-
-# Replace .env values with user input
-sed -i "$SED_SUFFIX" "s/{{APP_NAME}}/$APP_NAME/g" .env
-sed -i "$SED_SUFFIX" "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
-sed -i "$SED_SUFFIX" "s/{{DB_NAME}}/$DB_NAME/g" .env
 
 # Copy the .env file to the root directory of the project
 mv ../.env ../.env.old || true
