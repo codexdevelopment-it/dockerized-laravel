@@ -74,7 +74,7 @@ for service in "${services[@]}"; do
 done
 
 # Add final flags
-COMPOSE_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} up -d --remove-orphans --force-recreate"
+COMPOSE_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} up -d --remove-orphans"
 
 # Run the command
 echo -e "${GREEN}Running the following command:${NC}"
