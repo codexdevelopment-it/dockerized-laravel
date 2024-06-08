@@ -73,13 +73,15 @@ for service in "${services[@]}"; do
     COMPOSE_COMMAND="${COMPOSE_COMMAND} -f docker/compose/services/${service}.yml"
 done
 
-# Add final flags
-COMPOSE_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} up -d --remove-orphans"
+# Create final command
+DOWN_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} down"
+UP_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} up -d --remove-orphans"
 
 # Run the command
-echo -e "${GREEN}Running the following command:${NC}"
+echo -e "${GREEN}Final compose command:${NC}"
 echo -e "${BLUE}${COMPOSE_COMMAND}${NC}"
-eval "${COMPOSE_COMMAND}"
+eval "${DOWN_COMMAND}"
+eval "${UP_COMMAND}"
 
 
 # Ensure framework folders exist
