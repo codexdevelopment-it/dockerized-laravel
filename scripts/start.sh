@@ -3,10 +3,6 @@
 # Load .env file variables
 export $(grep -v '^#' .env | xargs)
 
-# Initialize variables
-server=""
-services=()
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -14,62 +10,29 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Print usage
-usage() {
-    echo -e "${YELLOW}Usage: $0 --server <server_name> --services <service1,service2,...>${NC}"
-    echo -e "${GREEN}Available servers:${NC} artisan, nginx, caddy, fpm"
-    echo -e "  ${BLUE}artisan:${NC} default Laravel server, use it for local development"
-    echo -e "  ${BLUE}nginx:${NC} used as reverse proxy to expose application from fpm to port (needs a global web server to handle https)"
-    echo -e "  ${BLUE}caddy:${NC} used as a full web server to expose application from fpm to internet with automatic SSL"
-    echo -e "  ${BLUE}fpm:${NC} exposes the fpm service to a unix socket file for external webservers to connect (see fpm.conf)"
-    echo -e "${GREEN}Available services:${NC} "
-    echo -e "  ${BLUE}mailpit:${NC} Email testing service"
+# Get SERVER and SERVICES from .env
+if [ -z "$SERVER" ]; then
+    echo -e "${RED}SERVER is not set in .env file${NC}"
     exit 1
-}
-
-# Check if no arguments were passed
-if [ $# -eq 0 ]; then
-    usage
 fi
 
-# Parse arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --server)
-            server="$2"
-            shift 2
-            ;;
-        --services)
-            IFS=',' read -r -a services <<< "$2"
-            shift 2
-            ;;
-        *)
-            echo -e "${RED}Unknown parameter passed: $1${NC}"
-            usage
-            ;;
-    esac
-done
-
-# Validate mandatory arguments
-if [[ -z "$server" ]]; then
-    echo -e "${RED}Error: --server is required.${NC}"
-    usage
-fi
+# Convert SERVICES string to array
+IFS=',' read -r -a SERVICES_ARRAY <<< "$SERVICES"
 
 # Dump output in color and nice format
 echo -e "${GREEN}Starting the application with the following configuration:${NC}"
-echo -e "${BLUE}Server:${NC} $server"
-echo -e "${BLUE}Services:${NC} ${services[@]}"
+echo -e "${BLUE}Server:${NC} $SERVER"
+echo -e "${BLUE}Services:${NC} ${SERVICES_ARRAY[@]}"
 echo -e "${BLUE}Environment:${NC} $APP_ENV"
 
 # Create the command to launch the chain of compose files
 COMPOSE_COMMAND="docker-compose -f docker/compose/base.yml -f docker/compose/${APP_ENV}.yml"
 
-# Add the server compose file
-COMPOSE_COMMAND="${COMPOSE_COMMAND} -f docker/compose/server/${server}.yml"
+# Add the SERVER compose file
+COMPOSE_COMMAND="${COMPOSE_COMMAND} -f docker/compose/server/${SERVER}.yml"
 
-# Add the services compose files
-for service in "${services[@]}"; do
+# Add the SERVICES compose files
+for service in "${SERVICES_ARRAY[@]}"; do
     COMPOSE_COMMAND="${COMPOSE_COMMAND} -f docker/compose/services/${service}.yml"
 done
 
@@ -80,6 +43,7 @@ UP_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} up -d --remove-orphans"
 # Run the command
 echo -e "${GREEN}Final compose command:${NC}"
 echo -e "${BLUE}${COMPOSE_COMMAND}${NC}"
+exit 1
 eval "${DOWN_COMMAND}"
 eval "${UP_COMMAND}"
 
@@ -140,17 +104,17 @@ fi
 # Run the queue worker (optional)
 #docker exec  "${CONTAINER_NAME}" php artisan queue:work --timeout=0
 
-# Start the server
-if [ "$server" == "octane" ]; then
+# Start the SERVER
+if [ "$SERVER" == "octane" ]; then
     docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
                                             /var/www/artisan octane:start \
-                                            --server=frankenphp \
+                                            --SERVER=frankenphp \
                                             --host=0.0.0.0 \
                                             --admin-port=2019 \
                                             --port=80
 fi
 
-if [ "$server" == "artisan" ]; then
+if [ "$SERVER" == "artisan" ]; then
 docker exec -it "${CONTAINER_NAME}" php -d variables_order=EGPCS \
                                         /var/www/artisan serve --host=0.0.0.0 --port=80
 fi

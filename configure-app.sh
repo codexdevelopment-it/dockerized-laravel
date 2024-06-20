@@ -9,6 +9,11 @@ read -r APP_NAME
 echo "Enter the name of the container, all containers will be prefixed with this name (e.g. 'laravel' will result in 'laravel-app', 'laravel-db', etc)"
 read -r CONTAINER_BASE_NAME
 
+# Ask user for repo url of the project
+echo "Enter the url of the repository, this will be used to deploy the project"
+read -r REPO_URL
+
+
 ## Ask user for database name
 #echo "Enter the name of the database"
 #read -r DB_NAME
@@ -26,10 +31,12 @@ if [[ $(uname) == "Darwin" ]]; then
     sed -i '' "s/{{APP_NAME}}/$APP_NAME/g" .env
     sed -i '' "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
     sed -i '' "s/{{DB_NAME}}/$DB_NAME/g" .env
+    sed -i '' "s|{{REPO_URL}}|$REPO_URL|g" .env
 else
     sed -i "s/{{APP_NAME}}/$APP_NAME/g" .env
     sed -i "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
     sed -i "s/{{DB_NAME}}/$DB_NAME/g" .env
+    sed -i "s|{{REPO_URL}}|$REPO_URL|g" .env
 fi
 
 # Copy the .env file to the root directory of the project
