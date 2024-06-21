@@ -25,8 +25,15 @@ echo -e "${BLUE}Server:${NC} $SERVER"
 echo -e "${BLUE}Services:${NC} ${SERVICES_ARRAY[@]}"
 echo -e "${BLUE}Environment:${NC} $APP_ENV"
 
+# Set ENV variable to restart always if APP_ENV != local
+if [ "$APP_ENV" != "local" ]; then
+    export RESTART_POLICY=always
+else
+    export RESTART_POLICY=no
+fi
+
 # Create the command to launch the chain of compose files
-COMPOSE_COMMAND="docker-compose -f docker/compose/base.yml -f docker/compose/${APP_ENV}.yml"
+COMPOSE_COMMAND="docker compose -f docker/compose/base.yml -f docker/compose/${APP_ENV}.yml"
 
 # Add the SERVER compose file
 COMPOSE_COMMAND="${COMPOSE_COMMAND} -f docker/compose/server/${SERVER}.yml"
@@ -43,10 +50,8 @@ UP_COMMAND="${COMPOSE_COMMAND} -p ${CONTAINER_NAME} up -d --remove-orphans"
 # Run the command
 echo -e "${GREEN}Final compose command:${NC}"
 echo -e "${BLUE}${COMPOSE_COMMAND}${NC}"
-exit 1
 eval "${DOWN_COMMAND}"
 eval "${UP_COMMAND}"
-
 
 # Ensure framework folders exist
 docker exec "${CONTAINER_NAME}" mkdir -p /var/www/storage/framework/sessions

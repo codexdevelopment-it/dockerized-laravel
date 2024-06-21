@@ -48,7 +48,7 @@ if [ -f "$DEPLOY_DIR/.env" ]; then
 fi
 
 # Copy production env file
-cp "$PROD_ENV" "$DEPLOY_DIR/.env"
+cp "$1" "$DEPLOY_DIR/.env" || exit 1
 
 # Change to the deployment directory
 cd "$DEPLOY_DIR" || exit 1
