@@ -56,32 +56,29 @@ eval "${UP_COMMAND}"
 DOCKER_APP_DIR=/var/www/${CONTAINER_NAME}
 
 # Ensure framework folders exist
-docker exec "${CONTAINER_NAME}" mkdir -p "${DOCKER_APP_DIR}"/storage/framework/sessions
-docker exec "${CONTAINER_NAME}" mkdir -p "${DOCKER_APP_DIR}"/storage/framework/views
-docker exec "${CONTAINER_NAME}" mkdir -p "${DOCKER_APP_DIR}"/storage/framework/cache
+docker exec "${CONTAINER_NAME}" mkdir -p storage/framework/sessions
+docker exec "${CONTAINER_NAME}" mkdir -p storage/framework/views
+docker exec "${CONTAINER_NAME}" mkdir -p storage/framework/cache
 
 # Ensure project directory is readable
-docker exec "${CONTAINER_NAME}" chmod 775 "${DOCKER_APP_DIR}"
+docker exec "${CONTAINER_NAME}" chmod 775 .
 
 # Ensure public folder is readable
-docker exec "${CONTAINER_NAME}" chmod -R 775 "${DOCKER_APP_DIR}"/public
-docker exec "${CONTAINER_NAME}" bash -c "setfacl -R -m d:u::rwx,d:g::rwx,d:o::rX ${DOCKER_APP_DIR}/public"
-
-# Link storage folder
-docker exec  "${CONTAINER_NAME}" php artisan storage:link
+docker exec "${CONTAINER_NAME}" chmod -R 775 public
+docker exec "${CONTAINER_NAME}" bash -c "setfacl -R -m d:u::rwx,d:g::rwx,d:o::rX public"
 
 # Ensure storage public folder is readable and future created files will be readable
-docker exec "${CONTAINER_NAME}" chmod +x "${DOCKER_APP_DIR}"
-docker exec "${CONTAINER_NAME}" chmod +x "${DOCKER_APP_DIR}"/storage
-docker exec "${CONTAINER_NAME}" mkdir -p "${DOCKER_APP_DIR}"/storage/app
-docker exec "${CONTAINER_NAME}" chmod +x "${DOCKER_APP_DIR}"/storage/app
-docker exec "${CONTAINER_NAME}" mkdir -p "${DOCKER_APP_DIR}"/storage/app/public
-docker exec "${CONTAINER_NAME}" chmod +x "${DOCKER_APP_DIR}"/storage/app/public
+docker exec "${CONTAINER_NAME}" chmod +x .
+docker exec "${CONTAINER_NAME}" chmod +x storage
+docker exec "${CONTAINER_NAME}" mkdir -p storage/app
+docker exec "${CONTAINER_NAME}" chmod +x storage/app
+docker exec "${CONTAINER_NAME}" mkdir -p storage/app/public
+docker exec "${CONTAINER_NAME}" chmod +x storage/app/public
 
 # Set default permissions for storage public folder (always read for everyone) with ACL
 # Not that capital X means execute only if it is a directory or already has execute permission for some user
 # The X for directories is very useful to ensure that new files and directories created there will be accessible
-docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX "${DOCKER_APP_DIR}"/storage/app/public/
+docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/
 
 # Install composer packages (read container name from environment variable)
 COMPOSER_COMMAND="docker exec ${CONTAINER_NAME} composer install"
@@ -96,6 +93,9 @@ if [ -z "$APP_KEY" ]; then
     echo "APP_KEY is not set, generating one"
     docker exec  "${CONTAINER_NAME}" php artisan key:generate
 fi
+
+# Link storage folder
+docker exec "${CONTAINER_NAME}" php artisan storage:link
 
 # Install npm packages
 echo "Installing npm packages"
@@ -118,16 +118,15 @@ fi
 
 # Start the SERVER
 if [ "$SERVER" == "octane" ]; then
-  echo "FIX OCTANE SERVER"
-#    docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
-#                                            /var/www/artisan octane:start \
-#                                            --SERVER=frankenphp \
-#                                            --host=0.0.0.0 \
-#                                            --admin-port=2019 \
-#                                            --port=80
+    docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
+                                            artisan octane:start \
+                                            --SERVER=frankenphp \
+                                            --host=0.0.0.0 \
+                                            --admin-port=2019 \
+                                            --port=80
 fi
 
 if [ "$SERVER" == "artisan" ]; then
 docker exec -it "${CONTAINER_NAME}" php -d variables_order=EGPCS \
-                                        "${DOCKER_APP_DIR}"/artisan serve --host=0.0.0.0 --port=80
+                                        artisan serve --host=0.0.0.0 --port=80
 fi

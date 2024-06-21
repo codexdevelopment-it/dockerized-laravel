@@ -8,7 +8,7 @@ services:
             context: ../
         image: '${CONTAINER_NAME}'
         restart: '${RESTART_POLICY}'
-        working_dir: /var/www
+        working_dir: '/var/www/${CONTAINER_NAME}'
         volumes:
             - '../../:/var/www/${CONTAINER_NAME}'
             - '../fpm.conf:/usr/local/etc/php-fpm.d/zz-docker.conf'

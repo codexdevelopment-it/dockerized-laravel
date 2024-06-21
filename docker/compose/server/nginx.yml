@@ -9,7 +9,7 @@ services:
       - '${APP_PORT}:80'
     volumes:
       - '../nginx.conf:/etc/nginx/conf.d/default.conf'
-      - '../../:/var/www'
+      - '../../:/var/www/${CONTAINER_NAME}'
     depends_on:
       - app
     networks:
