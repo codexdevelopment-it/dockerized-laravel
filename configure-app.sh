@@ -30,12 +30,14 @@ if [[ $(uname) == "Darwin" ]]; then
     sed -i '' "s/{{APP_NAME}}/$APP_NAME/g" .env
     sed -i '' "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
     sed -i '' "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" docker/fpm.conf
+    sed -i '' "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" docker/nginx.conf
     sed -i '' "s/{{DB_NAME}}/$DB_NAME/g" .env
     sed -i '' "s|{{REPO_URL}}|$REPO_URL|g" .env
 else
     sed -i "s/{{APP_NAME}}/$APP_NAME/g" .env
     sed -i "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" .env
     sed -i "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" docker/fpm.conf
+    sed -i "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" docker/nginx.conf
     sed -i "s/{{DB_NAME}}/$DB_NAME/g" .env
     sed -i "s|{{REPO_URL}}|$REPO_URL|g" .env
 fi
