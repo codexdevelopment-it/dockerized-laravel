@@ -11,6 +11,7 @@ RUN apk update && apk add \
     libzip-dev \
     git \
     curl \
+    nano \
     zip \
     unzip \
     procps \
