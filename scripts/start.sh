@@ -120,7 +120,6 @@ fi
 if [ "$SERVER" == "octane" ]; then
     docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
                                             artisan octane:start \
-                                            --SERVER=frankenphp \
                                             --host=0.0.0.0 \
                                             --admin-port=2019 \
                                             --port=80
