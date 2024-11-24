@@ -118,11 +118,13 @@ fi
 
 # Start the SERVER
 if [ "$SERVER" == "octane" ]; then
+    docker exec -d "${CONTAINER_NAME}" php artisan octane:install --server=frankenphp -q
     docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
-                                            artisan octane:start \
-                                            --host=0.0.0.0 \
-                                            --admin-port=2019 \
-                                            --port=80
+                                               artisan octane:start \
+                                               --server=frankenphp \
+                                               --host=0.0.0.0 \
+                                               --admin-port=2019 \
+                                               --port=80
 fi
 
 if [ "$SERVER" == "artisan" ]; then
