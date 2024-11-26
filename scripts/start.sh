@@ -118,6 +118,8 @@ fi
 
 # Start the SERVER
 if [ "$SERVER" == "octane" ]; then
+    echo "Starting octane server"
+    docker exec -d "${CONTAINER_NAME}" composer require laravel/octane
     docker exec -d "${CONTAINER_NAME}" php artisan octane:install --server=frankenphp -q
     docker exec -d "${CONTAINER_NAME}" php -d variables_order=EGPCS \
                                                artisan octane:start \
