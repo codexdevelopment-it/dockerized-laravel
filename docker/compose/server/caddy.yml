@@ -16,8 +16,8 @@ services:
       - '../../:/var/www/${CONTAINER_NAME}'
       - '${STORAGE_MOUNT_PATH:-./storage}:/var/www/${CONTAINER_NAME}/storage'
       - '../Caddyfile:/etc/caddy/Caddyfile'
-      - caddy_data:/data
-      - caddy_config:/config
+      - 'caddy_data:/data'  # DO NOT REMOVE IN ORDER TO PREVENT BEING RATE LIMITED WE STORE CERTIFICATES PERSISTENTLY
+      - 'caddy_config:/config'
 volumes:
   caddy_data:
   caddy_config:
