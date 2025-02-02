@@ -51,7 +51,7 @@ if [ "$APP_TYPE" == "new" ]; then
 
     # Move .env file to the new project
     rm -rf "$CONTAINER_BASE_NAME/.env"
-    mv .env "$CONTAINER_BASE_NAME/.env"
+    mv dockerized-laravel/.env "$CONTAINER_BASE_NAME/.env"
 else
     mv ../.env ../.env.old || true
     cp .env ../.env
