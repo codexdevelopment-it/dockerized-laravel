@@ -45,11 +45,12 @@ if [ "$APP_TYPE" == "new" ]; then
     cd ..
 
     # Copy docker and scripts folders to the new project
-    for dir in docker scripts; do
+    for dir in dockerized-laravel/docker dockerized-laravel/scripts; do
         cp -r "$dir" "$CONTAINER_BASE_NAME"
     done
 
     # Move .env file to the new project
+    rm -rf "$CONTAINER_BASE_NAME/.env"
     mv .env "$CONTAINER_BASE_NAME/.env"
 else
     mv ../.env ../.env.old || true
