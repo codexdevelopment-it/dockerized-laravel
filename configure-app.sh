@@ -40,10 +40,16 @@ if [ "$APP_TYPE" == "new" ]; then
     docker exec "$CONTAINER_BASE_NAME" composer global require laravel/installer
     docker exec -it "$CONTAINER_BASE_NAME" sh -c "~/.composer/vendor/bin/laravel new $CONTAINER_BASE_NAME"
 
+    # Move new project outside dockerized laravel folder
+    mv "$CONTAINER_BASE_NAME" ..
+    cd ..
+
+    # Copy docker and scripts folders to the new project
     for dir in docker scripts; do
         cp -r "$dir" "$CONTAINER_BASE_NAME"
     done
 
+    # Move .env file to the new project
     mv .env "$CONTAINER_BASE_NAME/.env"
 else
     mv ../.env ../.env.old || true
@@ -54,3 +60,6 @@ else
 fi
 
 rm -rf dockerized-laravel
+
+echo "Configuration completed successfully!"
+echo "Run './scripts/start.sh' to start the app."
