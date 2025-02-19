@@ -1,8 +1,8 @@
 https://host  {
-    root * /var/www/public
+    root * /var/www/{{CONTAINER_NAME}}/public
     file_server
 
-    php_fastcgi unix//var/www/fpm.sock {
+    php_fastcgi unix//var/www/{{CONTAINER_NAME}}/fpm.sock {
         index index.php
     }
 }

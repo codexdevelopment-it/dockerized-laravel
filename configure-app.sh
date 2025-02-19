@@ -31,7 +31,7 @@ update_config() {
 }
 
 # Update configuration files by replacing placeholders
-for file in .env docker/fpm.conf docker/nginx.conf; do
+for file in .env docker/Caddyfile docker/nginx-rtmp.conf docker/fpm.conf docker/nginx.conf; do
     [ -f "$file" ] && update_config "$file"
 done
 
