@@ -1,0 +1,21 @@
+services:
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    #image: arm64v8/phpmyadmin:latest
+    container_name: '${CONTAINER_NAME}-phpmyadmin'
+    restart: '${RESTART_POLICY}'
+    ports:
+      - '${PHP_MY_ADMIN_PORT:-8000}:80'
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      PMA_USER: '${DB_USERNAME}'
+      PMA_PASSWORD: '${DB_PASSWORD}'
+    networks:
+      - app-network
+    depends_on:
+      - mariadb
+
+networks:
+  app-network:
+    driver: bridge
