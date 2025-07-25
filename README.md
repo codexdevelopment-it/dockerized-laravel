@@ -7,7 +7,7 @@ apt install rsync acl
 ```
 
 ## Usage
-1. Execute the following command to directly integrate this project structure into your Laravel project.
+1. Execute the following command to create a new dockerized-laravel project or to install it in an existing project.
 ```bash
 bash <(curl -s  https://raw.githubusercontent.com/codexdevelopment-it/dockerized-laravel/main/configure-app.sh)
 ```
