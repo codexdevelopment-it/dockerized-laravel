@@ -1,5 +1,4 @@
 services:
-
     # App
     app:
         container_name: '${CONTAINER_NAME}'
@@ -12,6 +11,7 @@ services:
         volumes:
             - '../../:/var/www/${CONTAINER_NAME}'
             - '../fpm.conf:/usr/local/etc/php-fpm.d/zz-docker.conf'
+            - '../php.ini:/usr/local/etc/php/php.ini:ro'
         networks:
             - app-network
 
