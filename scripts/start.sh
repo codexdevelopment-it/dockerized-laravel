@@ -69,6 +69,9 @@ if [ "$APP_ENV" == "production" ]; then
     docker exec "${CONTAINER_NAME}" php artisan config:cache
     docker exec "${CONTAINER_NAME}" php artisan route:cache
     docker exec "${CONTAINER_NAME}" php artisan view:cache
+    docker exec "${CONTAINER_NAME}" php artisan icons:cache
+    docker exec "${CONTAINER_NAME}" php artisan optimize
+    docker exec "${CONTAINER_NAME}" php artisan filament:optimize
 fi
 
 # Run the queue worker (optional)
