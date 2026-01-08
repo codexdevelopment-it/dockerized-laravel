@@ -2,6 +2,9 @@ https://host  {
     root * /var/www/{{CONTAINER_NAME}}/public
     file_server
 
+    php_fastcgi @onlyIndex unix//var/www/{{CONTAINER_NAME}}/fpm.sock {
+        index index.php
+    }
 
     # Block direct access to any php other than /index.php
     @blockPhp {
@@ -14,14 +17,6 @@ https://host  {
     # and all other requests fall back to index.php via Laravel
     @onlyIndex path /index.php
 
-    php_fastcgi @onlyIndex unix//var/www/cambiopronto/fpm.sock {
-        index index.php
-    }
-
     # Laravel handle all other routes via index.php internally
     try_files {path} /index.php?{query}
-
-    php_fastcgi unix//var/www/{{CONTAINER_NAME}}/fpm.sock {
-        index index.php
-    }
 }
