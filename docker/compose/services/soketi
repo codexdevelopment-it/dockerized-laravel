@@ -1,0 +1,13 @@
+services:
+  soketi:
+    container_name: '${CONTAINER_NAME}-soketi'
+    image: 'quay.io/soketi/soketi:latest-16-alpine'
+    environment:
+      #- SOKETI_DEBUG='${DEBUG:-1}'
+      - DEFAULT_APP_ID='${PUSHER_APP_ID:-some-id}'
+      - DEFAULT_APP_KEY='${PUSHER_APP_KEY:-app-key}'
+      - DEFAULT_APP_SECRET='${PUSHER_APP_SECRET:-some-app-secret}'
+    ports:
+      - '${SOKETI_PORT:-6001}:6001'
+    networks:
+      - app-network
