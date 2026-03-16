@@ -7,7 +7,7 @@ services:
           context: ../../
           dockerfile: docker/Dockerfile
         image: '${CONTAINER_NAME}'
-        restart: 'unless-stopped'
+        restart: '${RESTART_POLICY}'
         working_dir: '/var/www/${CONTAINER_NAME}'
         volumes:
             - '../../:/var/www/${CONTAINER_NAME}'
@@ -22,7 +22,7 @@ services:
     mariadb:
         container_name: '${CONTAINER_NAME}-mariadb'
         image: 'mariadb:latest'
-        restart: 'unless-stopped'
+        restart: '${RESTART_POLICY}'
         environment:
             MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
             MYSQL_ROOT_HOST: '%'

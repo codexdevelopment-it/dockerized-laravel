@@ -15,4 +15,4 @@ services:
       - app-network
     volumes:
       - ${MEILI_DB_PATH:-./meilisearch}:/data.ms
-    restart: unless-stopped
+    restart: '${RESTART_POLICY}'

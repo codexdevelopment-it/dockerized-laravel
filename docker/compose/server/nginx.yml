@@ -2,7 +2,7 @@ services:
 
   # Nginx server
   nginx:
-    restart: unless-stopped
+    restart: '${RESTART_POLICY}'
     container_name: '${CONTAINER_NAME}-nginx'
     image: nginx:latest
     ports:

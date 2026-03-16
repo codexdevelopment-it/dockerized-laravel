@@ -11,5 +11,5 @@ services:
       - ../../public/assets/videos/rtmp:/var/www/videos  # Volume for storing video files
       - ../../public/assets/videos/hls:/var/www/hls  # Volume for storing HLS files
       - ../nginx-rtmp.conf:/etc/nginx/nginx.conf  # Mount your custom Nginx configuration
-    restart: unless-stopped
+    restart: '${RESTART_POLICY}'
 

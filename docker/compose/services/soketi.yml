@@ -1,7 +1,7 @@
 services:
   soketi:
     container_name: '${CONTAINER_NAME}-soketi'
-    restart: unless-stopped
+    restart: '${RESTART_POLICY}'
     image: 'quay.io/soketi/soketi:latest-16-alpine'
     environment:
       #- SOKETI_DEBUG='${DEBUG:-1}'
