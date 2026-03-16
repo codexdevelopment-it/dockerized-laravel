@@ -1,10 +1,5 @@
 services:
 
-  # App
-  app:
-    ports:
-      - '${APP_PORT:-8000}:80'
-
   # MariaDB
   mariadb:
     ports:

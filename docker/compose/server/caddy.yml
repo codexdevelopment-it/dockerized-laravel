@@ -2,7 +2,7 @@ services:
 
   # Proxy server
   caddy:
-    restart: '${RESTART_POLICY}'
+    restart: unless-stopped
     image: caddy:latest
     container_name: '${CONTAINER_NAME}-caddy'
     depends_on:

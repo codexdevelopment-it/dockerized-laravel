@@ -3,10 +3,11 @@ services:
     app:
         container_name: '${CONTAINER_NAME}'
         build:
-            dockerfile: Dockerfile
-            context: ../
+          # App Root
+          context: ../../
+          dockerfile: docker/Dockerfile
         image: '${CONTAINER_NAME}'
-        restart: '${RESTART_POLICY}'
+        restart: 'unless-stopped'
         working_dir: '/var/www/${CONTAINER_NAME}'
         volumes:
             - '../../:/var/www/${CONTAINER_NAME}'
@@ -21,7 +22,7 @@ services:
     mariadb:
         container_name: '${CONTAINER_NAME}-mariadb'
         image: 'mariadb:latest'
-        restart: '${RESTART_POLICY}'
+        restart: 'unless-stopped'
         environment:
             MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
             MYSQL_ROOT_HOST: '%'

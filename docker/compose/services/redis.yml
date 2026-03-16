@@ -1,0 +1,13 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: '${CONTAINER_NAME}-redis'
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+volumes:
+  redis_data:
+    driver: local

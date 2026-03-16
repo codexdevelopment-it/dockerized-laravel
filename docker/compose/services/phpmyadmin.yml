@@ -3,7 +3,7 @@ services:
     image: phpmyadmin/phpmyadmin:latest
     #image: arm64v8/phpmyadmin:latest
     container_name: '${CONTAINER_NAME}-phpmyadmin'
-    restart: '${RESTART_POLICY}'
+    restart: unless-stopped
     ports:
       - '${PHP_MY_ADMIN_PORT:-8000}:80'
     environment:

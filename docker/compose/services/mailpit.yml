@@ -2,7 +2,7 @@ services:
   mailpit:
     image: axllent/mailpit
     container_name: ${CONTAINER_NAME}-mailpit
-    restart: '${RESTART_POLICY}'
+    restart: unless-stopped
     networks:
       - app-network
     volumes:
