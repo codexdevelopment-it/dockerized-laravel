@@ -1,5 +1,9 @@
 services:
 
+  app:
+    volumes:
+      - '../../:/var/www/${CONTAINER_NAME}'
+
   # MariaDB
   mariadb:
     ports:
