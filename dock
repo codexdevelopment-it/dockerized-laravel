@@ -94,6 +94,7 @@ show_help() {
     echo -e "    ${CYAN}tinker${NC}               Start Laravel Tinker REPL"
     echo -e "    ${CYAN}migrate${NC}              Run database migrations"
     echo -e "    ${CYAN}fresh${NC}                Fresh migrate with seed"
+    echo -e "    ${CYAN}seed${NC}                 Run database seeders"
     echo ""
     echo -e "    ${YELLOW}deploy${NC} <env-file>   Deploy to production server"
     echo -e "    ${YELLOW}install${NC}             Install dockerized-laravel in a project"
@@ -237,16 +238,15 @@ cmd_start() {
     # Start containers
     print_section "${ICON_PACKAGE} Starting Containers"
     
+    local exit_code=0
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         # In verbose mode, show all output directly
         print_info "Starting containers..."
-        docker_up "$build"
-        local exit_code=$?
+        docker_up "$build" || exit_code=$?
     else
         # In normal mode, show progress inline
         echo -ne "  ${ICON_BULLET} Building and starting containers..."
-        docker_up "$build" > /dev/null 2>&1
-        local exit_code=$?
+        docker_up "$build" > /dev/null 2>&1 || exit_code=$?
         if [[ $exit_code -eq 0 ]]; then
             echo -e " ${GREEN}${ICON_SUCCESS}${NC}"
         else
@@ -264,16 +264,16 @@ cmd_start() {
     # Give containers a moment to initialize
     sleep 2
     
-    # Print status
-    print_container_status
+    # Print status (ignore errors - containers might not be labeled yet)
+    print_container_status || true
     
     # Handle server-specific setup
     if [[ "${SERVER:-artisan}" == "octane" ]]; then
-        setup_octane
+        setup_octane || true
     fi
     
     # Standard provisioning
-    provision_app
+    provision_app || true
     
     # Handle artisan serve mode (interactive)
     if [[ "${SERVER:-artisan}" == "artisan" ]]; then
@@ -348,7 +348,7 @@ cmd_stop() {
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
     
     print_info "Stopping containers..."
-    docker_down
+    docker_down || true
     print_success "Containers stopped"
 }
 
@@ -359,7 +359,7 @@ cmd_restart() {
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
     
     print_info "Restarting containers..."
-    docker_restart
+    docker_restart || true
     print_success "Containers restarted"
 }
 
@@ -403,14 +403,14 @@ cmd_logs() {
 # Command: shell
 # -----------------------------------------------------------------------------
 cmd_shell() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    
     local container="${1:-${CONTAINER_NAME}}"
     
     # Handle container name shortcuts
-    if [[ "$container" != "${CONTAINER_NAME}" ]] && [[ "$container" != "${CONTAINER_NAME}-"* ]]; then
-        container="${CONTAINER_NAME}-${container}"
+    if [[ -n "$1" ]] && [[ "$1" != "${CONTAINER_NAME}" ]] && [[ "$1" != "${CONTAINER_NAME}-"* ]]; then
+        container="${CONTAINER_NAME}-${1}"
     fi
-    
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
     
     print_info "Opening shell in ${container}..."
     docker exec -it "$container" bash || docker exec -it "$container" sh
@@ -476,6 +476,14 @@ cmd_fresh() {
     fi
     
     docker exec -it "${CONTAINER_NAME}" php artisan migrate:fresh --seed "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: seed
+# -----------------------------------------------------------------------------
+cmd_seed() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker exec -it "${CONTAINER_NAME}" php artisan db:seed "$@"
 }
 
 # -----------------------------------------------------------------------------
@@ -647,6 +655,7 @@ main() {
         tinker)   cmd_tinker "${ARGS[@]}" ;;
         migrate)  cmd_migrate "${ARGS[@]}" ;;
         fresh)    cmd_fresh "${ARGS[@]}" ;;
+        seed)     cmd_seed "${ARGS[@]}" ;;
         deploy)   cmd_deploy "${ARGS[@]}" ;;
         install)  cmd_install "${ARGS[@]}" ;;
         help)     show_help ;;

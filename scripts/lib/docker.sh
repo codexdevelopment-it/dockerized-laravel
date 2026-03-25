@@ -130,7 +130,7 @@ docker_down() {
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         eval "${compose_cmd} down"
     else
-        eval "${compose_cmd} down" 2>&1 | grep -v "^$"
+        eval "${compose_cmd} down" 2>&1 | head -10 || true
     fi
 }
 
