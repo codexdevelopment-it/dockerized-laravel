@@ -27,11 +27,28 @@ load_env() {
     
     print_verbose "Loading environment from: ${env_file}"
     
-    # Export variables, skipping comments and empty lines
-    set -a
-    # shellcheck disable=SC1090
-    source <(grep -v '^\s*#' "$env_file" | grep -v '^\s*$' | sed 's/\r$//')
-    set +a
+    # Export variables from .env file
+    # Read line by line to handle comments and empty lines
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Only process lines that look like VAR=value
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local var_name="${BASH_REMATCH[1]}"
+            local var_value="${BASH_REMATCH[2]}"
+            
+            # Remove surrounding quotes if present
+            var_value="${var_value#\"}"
+            var_value="${var_value%\"}"
+            var_value="${var_value#\'}"
+            var_value="${var_value%\'}"
+            
+            # Export the variable
+            export "$var_name=$var_value"
+        fi
+    done < "$env_file"
     
     return 0
 }
