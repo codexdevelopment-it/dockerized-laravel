@@ -243,11 +243,15 @@ cmd_start() {
         docker_up "$build"
         local exit_code=$?
     else
-        # In normal mode, use spinner
-        start_spinner "Starting containers..."
+        # In normal mode, show progress inline
+        echo -ne "  ${ICON_BULLET} Building and starting containers..."
         docker_up "$build" > /dev/null 2>&1
         local exit_code=$?
-        stop_spinner
+        if [[ $exit_code -eq 0 ]]; then
+            echo -e " ${GREEN}${ICON_SUCCESS}${NC}"
+        else
+            echo -e " ${RED}${ICON_ERROR}${NC}"
+        fi
     fi
     
     if [[ $exit_code -ne 0 ]]; then
@@ -299,7 +303,7 @@ setup_octane() {
     docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-aarch64 2>/dev/null
     
     # Restart octane service
-    docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/supervisord.conf restart octane 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/00-base.conf restart octane 2>/dev/null || true
 }
 
 # Provision the application

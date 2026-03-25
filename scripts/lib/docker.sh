@@ -112,7 +112,7 @@ docker_up() {
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         eval "$up_cmd"
     else
-        eval "$up_cmd" 2>&1 | grep -v "^$" | head -20
+        eval "$up_cmd" 2>&1 | head -20 || true
     fi
 }
 

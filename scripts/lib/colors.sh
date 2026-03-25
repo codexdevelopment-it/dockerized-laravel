@@ -60,6 +60,8 @@ readonly ICON_INFO="ℹ️"
 readonly ICON_PACKAGE="📦"
 readonly ICON_DATABASE="🗄️"
 readonly ICON_GLOBE="🌐"
+readonly ICON_SUCCESS="✓"
+readonly ICON_BULLET="•"
 
 # -----------------------------------------------------------------------------
 # Output Functions
