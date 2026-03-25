@@ -1,37 +1,64 @@
+# =============================================================================
+# Base Docker Compose Configuration
+# Common service definitions shared by all environments
+# =============================================================================
+
 services:
-    # App
-    app:
-        container_name: '${CONTAINER_NAME}'
-        build:
-          # App Root
-          context: ../../
-          dockerfile: docker/Dockerfile
-        image: '${CONTAINER_NAME}'
-        restart: '${RESTART_POLICY}'
-        working_dir: '/var/www/${CONTAINER_NAME}'
-        volumes:
-            - '../fpm.conf:/usr/local/etc/php-fpm.d/zz-docker.conf'
-            - '../php.ini:/usr/local/etc/php/php.ini:ro'
-            - "/etc/timezone:/etc/timezone:ro"
-            - "/etc/localtime:/etc/localtime:ro"
-        networks:
-            - app-network
+  # ---------------------------------------------------------------------------
+  # Application Container
+  # ---------------------------------------------------------------------------
+  app:
+    container_name: '${CONTAINER_NAME}'
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile
+      args:
+        - BUILD_ENV=${APP_ENV:-local}
+    image: '${CONTAINER_NAME}:${APP_ENV:-local}'
+    restart: '${RESTART_POLICY:-no}'
+    working_dir: '/var/www/${CONTAINER_NAME}'
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - CONTAINER_NAME=${CONTAINER_NAME}
+    volumes:
+      # FPM pool configuration
+      - '../config/fpm/pool.conf:/usr/local/etc/php-fpm.d/zz-docker.conf:ro'
+      # Timezone sync (Linux only, ignored on macOS)
+      - '/etc/timezone:/etc/timezone:ro'
+      - '/etc/localtime:/etc/localtime:ro'
+    networks:
+      - app-network
+    healthcheck:
+      test: ['CMD', 'php', '-v']
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-    # Database
-    mariadb:
-        container_name: '${CONTAINER_NAME}-mariadb'
-        image: 'mariadb:latest'
-        restart: '${RESTART_POLICY}'
-        environment:
-            MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
-            MYSQL_ROOT_HOST: '%'
-            MYSQL_DATABASE: '${DB_DATABASE}'
-            MYSQL_USER: '${DB_USERNAME}'
-            MYSQL_PASSWORD: '${DB_PASSWORD}'
-            TZ: "Europe/Rome"
-        networks:
-            - app-network
+  # ---------------------------------------------------------------------------
+  # Database Container
+  # ---------------------------------------------------------------------------
+  mariadb:
+    container_name: '${CONTAINER_NAME}-mariadb'
+    image: 'mariadb:latest'
+    restart: '${RESTART_POLICY:-no}'
+    environment:
+      MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: '${DB_DATABASE}'
+      MYSQL_USER: '${DB_USERNAME}'
+      MYSQL_PASSWORD: '${DB_PASSWORD}'
+      TZ: '${APP_TIMEZONE:-Europe/Rome}'
+    networks:
+      - app-network
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
+# =============================================================================
+# Networks
+# =============================================================================
 networks:
-    app-network:
-        driver: bridge
+  app-network:
+    driver: bridge

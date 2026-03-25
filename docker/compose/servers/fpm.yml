@@ -1,0 +1,11 @@
+# =============================================================================
+# PHP-FPM Server
+# Traditional PHP-FPM setup (requires nginx or caddy)
+# =============================================================================
+
+services:
+  app:
+    # FPM listens on socket/port, requires a web server in front
+    # Use this with nginx.yml or caddy.yml server compose files
+    volumes:
+      - '../config/fpm/pool.conf:/usr/local/etc/php-fpm.d/www.conf:ro'

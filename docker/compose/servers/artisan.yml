@@ -1,0 +1,11 @@
+# =============================================================================
+# Artisan Serve Server
+# Simple development server using `php artisan serve`
+# =============================================================================
+
+services:
+  app:
+    ports:
+      - '${APP_PORT:-8000}:80'
+    # Note: artisan serve is started interactively by the dock CLI
+    # This compose file just exposes the port

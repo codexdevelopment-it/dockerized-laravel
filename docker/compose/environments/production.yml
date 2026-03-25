@@ -1,0 +1,40 @@
+# =============================================================================
+# Production Environment
+# Optimized for performance and security
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application - Production Overrides
+  # ---------------------------------------------------------------------------
+  app:
+    volumes:
+      # Only mount storage directory (code is baked into image)
+      - '${STORAGE_MOUNT_PATH:-./storage}:/var/www/${CONTAINER_NAME}/storage'
+      # Environment-specific PHP configuration
+      - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
+      - '../config/php/production.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'
+      # Environment-specific supervisor configuration
+      - '../config/supervisor/base.conf:/etc/supervisor/conf.d/00-base.conf:ro'
+      - '../config/supervisor/production.conf:/etc/supervisor/conf.d/01-programs.conf:ro'
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Database - Production Overrides
+  # ---------------------------------------------------------------------------
+  mariadb:
+    # No exposed ports in production (access via network only)
+    volumes:
+      # Production storage mount
+      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/mysql'
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M

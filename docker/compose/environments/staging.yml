@@ -1,0 +1,29 @@
+# =============================================================================
+# Staging Environment
+# Production-like but with more debugging capability
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application - Staging Overrides
+  # ---------------------------------------------------------------------------
+  app:
+    volumes:
+      # Only mount storage directory (code is baked into image)
+      - '${STORAGE_MOUNT_PATH:-./storage}:/var/www/${CONTAINER_NAME}/storage'
+      # Environment-specific PHP configuration
+      - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
+      - '../config/php/staging.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'
+      # Environment-specific supervisor configuration
+      - '../config/supervisor/base.conf:/etc/supervisor/conf.d/00-base.conf:ro'
+      - '../config/supervisor/staging.conf:/etc/supervisor/conf.d/01-programs.conf:ro'
+
+  # ---------------------------------------------------------------------------
+  # Database - Staging Overrides
+  # ---------------------------------------------------------------------------
+  mariadb:
+    # Expose port for debugging if needed
+    ports:
+      - '${DB_PORT:-3306}:3306'
+    volumes:
+      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/mysql'

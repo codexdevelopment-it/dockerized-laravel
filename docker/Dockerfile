@@ -1,86 +1,115 @@
-# Stage 1: Build stage
+# =============================================================================
+# Dockerized Laravel - Multi-Environment Dockerfile
+# Supports: local, staging, production
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder
+# Installs dependencies and prepares the application
+# -----------------------------------------------------------------------------
 FROM dunglas/frankenphp:1.11.2-php8.3 AS builder
 
-# Ensure the extension installer is present
+# Build argument for environment
+ARG BUILD_ENV=local
+
+# Install the PHP extension installer
 ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN chmod +x /usr/local/bin/install-php-extensions
 
-# Install build-time tools (Included Node.js/npm for frontend assets)
+# Install build-time tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git unzip curl nodejs npm && rm -rf /var/lib/apt/lists/*
+    git unzip curl nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install extensions
+# Install PHP extensions
 RUN install-php-extensions zip intl bcmath exif calendar
 
+# Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
 WORKDIR /var/www/html
 
-# Copy app files from the root context
+# Copy dependency files first (for better caching)
 COPY composer.json composer.lock package.json* package-lock.json* ./
 
-# Install dependencies WITHOUT --no-dev so dev packages (like Pail, Pint, etc.) stay for local dev
-RUN composer install --no-scripts --no-autoloader --prefer-dist
+# Install PHP dependencies
+# In local, we include dev dependencies for tools like Pail, Pint, etc.
+RUN if [ "$BUILD_ENV" = "production" ]; then \
+        composer install --no-scripts --no-autoloader --prefer-dist --no-dev; \
+    else \
+        composer install --no-scripts --no-autoloader --prefer-dist; \
+    fi
 
+# Copy application files
 COPY . .
+
+# Dump autoloader
 RUN composer dump-autoload --optimize --no-scripts
 
-# Stage 2: Production & Local stage
-FROM dunglas/frankenphp:1.11.2-php8.3 AS production
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime
+# Final production-ready image
+# -----------------------------------------------------------------------------
+FROM dunglas/frankenphp:1.11.2-php8.3 AS runtime
 
-# Ensure the extension installer is present
+# Build argument for environment
+ARG BUILD_ENV=local
+
+# Install the PHP extension installer
 ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN chmod +x /usr/local/bin/install-php-extensions
 
-# Set the server name for FrankenPHP
+# FrankenPHP server configuration
 ENV SERVER_NAME=":8000"
 
-# --- FIXED: Added git and unzip so Composer can actually download/extract packages inside the container ---
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor curl acl nano procps git unzip && rm -rf /var/lib/apt/lists/*
+    supervisor curl acl nano procps git unzip \
+    && rm -rf /var/lib/apt/lists/*
 
-# --- FIXED: Copy Composer into the final running container ---
+# Install Composer (needed for local dev where vendor is mounted)
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Install production extensions
+# Install production PHP extensions
 RUN install-php-extensions \
     pdo_pgsql pdo_mysql gd intl zip opcache redis pcntl bcmath exif calendar mbstring
 
-# Use laravel user and Debian's native www-data group
-# Debian's www-data group already exists (usually GID 33). We create the 'laravel' user and add it to this group.
+# Create laravel user with www-data group
 RUN useradd -u 1000 -g www-data -m laravel
 
 WORKDIR /var/www/html
 
-# 1. Copy the application from the builder stage with new ownership
+# Copy application from builder stage
 COPY --from=builder --chown=laravel:www-data /var/www/html /var/www/html
 
-# 2. Config files from the docker context
-COPY --chown=laravel:www-data ./docker/php.ini /usr/local/etc/php/php.ini
-COPY ./docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# Permissions and Octane binary setup
+# Create Octane binary links
 RUN mkdir -p /var/www/html/vendor/laravel/octane/bin \
     && ln -sf /usr/local/bin/frankenphp /var/www/html/vendor/laravel/octane/bin/frankenphp-linux-x86_64 \
     && ln -sf /usr/local/bin/frankenphp /var/www/html/vendor/laravel/octane/bin/frankenphp-linux-aarch64 \
     && chown -R laravel:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/vendor/laravel/octane/bin \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
+# Switch to laravel user for optimization commands
 USER laravel
 
-# --- FLEXIBLE OPTIMIZATION SECTION ---
-RUN php artisan config:cache && \
-    php artisan route:cache && \
-    php artisan view:cache && \
-    if php artisan list | grep -q "filament:optimize"; then \
-        echo "Filament detected, optimizing..." && \
-        php artisan filament:optimize; \
+# Run Laravel optimizations only in production/staging
+# In local dev, these caches are overwritten by mounted files anyway
+RUN if [ "$BUILD_ENV" = "production" ] || [ "$BUILD_ENV" = "staging" ]; then \
+        php artisan config:cache && \
+        php artisan route:cache && \
+        php artisan view:cache && \
+        if php artisan list | grep -q "filament:optimize"; then \
+            echo "Filament detected, optimizing..." && \
+            php artisan filament:optimize; \
+        fi; \
     else \
-        echo "Filament not found, skipping filament:optimize."; \
+        echo "Skipping optimizations for ${BUILD_ENV} environment"; \
     fi
-# -------------------------------------
 
 EXPOSE 8000
 
-# Run as root so Supervisord can manage processes, but workers run as 'laravel'
+# Switch back to root for supervisord
 USER root
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+
+# Default command: run supervisord
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/00-base.conf"]

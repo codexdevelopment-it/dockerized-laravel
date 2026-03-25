@@ -1,0 +1,39 @@
+; =============================================================================
+; Caddy Configuration for Laravel
+; Automatic HTTPS + Reverse Proxy
+; =============================================================================
+
+{$DOMAIN:localhost} {
+    root * /var/www/{$CONTAINER_NAME:app}/public
+    
+    # Enable file server
+    file_server
+    
+    # PHP-FPM handling
+    php_fastcgi app:9000 {
+        index index.php
+    }
+    
+    # Block direct access to PHP files except index.php
+    @blockPhp {
+        path *.php
+        not path /index.php
+    }
+    respond @blockPhp 404
+    
+    # Laravel routing - all requests fall through to index.php
+    try_files {path} /index.php?{query}
+    
+    # Security headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+    
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}

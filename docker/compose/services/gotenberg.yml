@@ -1,6 +1,14 @@
+# =============================================================================
+# Gotenberg Service
+# PDF generation from HTML, URLs, and documents
+# =============================================================================
+
 services:
   gotenberg:
-    container_name: ${CONTAINER_NAME}-gotenberg
+    container_name: '${CONTAINER_NAME}-gotenberg'
     image: gotenberg/gotenberg:8
+    restart: '${RESTART_POLICY:-no}'
     ports:
-      - "3000:3000"
+      - '${GOTENBERG_PORT:-3000}:3000'
+    networks:
+      - app-network

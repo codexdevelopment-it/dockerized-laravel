@@ -1,0 +1,652 @@
+#!/bin/bash
+# =============================================================================
+# dock - Dockerized Laravel CLI
+# =============================================================================
+# Unified command-line interface for managing dockerized Laravel applications.
+#
+# Usage: ./dock <command> [options]
+#
+# Commands:
+#   start       Start the application containers
+#   stop        Stop all containers
+#   restart     Restart all containers
+#   status      Show container status
+#   logs        View container logs
+#   shell       Open a shell in a container
+#   exec        Execute a command in the app container
+#   artisan     Run Laravel Artisan commands
+#   composer    Run Composer commands
+#   npm         Run NPM commands
+#   tinker      Start Laravel Tinker
+#   migrate     Run database migrations
+#   fresh       Fresh migrate with seed
+#   deploy      Deploy to production
+#   install     Install dockerized-laravel in a project
+#   help        Show help
+#
+# =============================================================================
+
+set -e
+
+# Determine script location and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Handle both direct execution and symlink scenarios
+if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
+    PROJECT_ROOT="$SCRIPT_DIR"
+    SCRIPT_LIB_DIR="${SCRIPT_DIR}/scripts/lib"
+elif [[ -d "${SCRIPT_DIR}/lib" ]]; then
+    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+    SCRIPT_LIB_DIR="${SCRIPT_DIR}/lib"
+else
+    # Assume we're in project root
+    PROJECT_ROOT="$SCRIPT_DIR"
+    SCRIPT_LIB_DIR="${SCRIPT_DIR}/scripts/lib"
+fi
+
+export SCRIPT_LIB_DIR
+export PROJECT_ROOT
+
+# Source library files
+source "${SCRIPT_LIB_DIR}/colors.sh"
+source "${SCRIPT_LIB_DIR}/utils.sh"
+source "${SCRIPT_LIB_DIR}/env.sh"
+source "${SCRIPT_LIB_DIR}/checks.sh"
+source "${SCRIPT_LIB_DIR}/docker.sh"
+
+# -----------------------------------------------------------------------------
+# Global Options
+# -----------------------------------------------------------------------------
+VERBOSE=false
+QUIET=false
+DEBUG=false
+ENV_FILE=".env"
+COMMAND=""
+ARGS=()
+
+# -----------------------------------------------------------------------------
+# Version
+# -----------------------------------------------------------------------------
+VERSION="2.0.0"
+
+# -----------------------------------------------------------------------------
+# Help Text
+# -----------------------------------------------------------------------------
+show_help() {
+    cat << EOF
+${BOLD}${ICON_DOCKER} Dockerized Laravel CLI${NC} v${VERSION}
+
+${BOLD}USAGE${NC}
+    ./dock <command> [options] [arguments]
+
+${BOLD}COMMANDS${NC}
+    ${GREEN}start${NC}               Start the application containers
+    ${GREEN}stop${NC}                Stop all containers
+    ${GREEN}restart${NC}             Restart all containers
+    ${GREEN}status${NC}              Show container status
+    ${GREEN}logs${NC} [service]      View container logs (-f to follow)
+    ${GREEN}shell${NC} [container]   Open a shell in a container (default: app)
+    ${GREEN}exec${NC} <cmd>          Execute a command in the app container
+
+    ${CYAN}artisan${NC} <cmd>        Run Laravel Artisan command
+    ${CYAN}composer${NC} <cmd>       Run Composer command
+    ${CYAN}npm${NC} <cmd>            Run NPM command
+    ${CYAN}tinker${NC}               Start Laravel Tinker REPL
+    ${CYAN}migrate${NC}              Run database migrations
+    ${CYAN}fresh${NC}                Fresh migrate with seed
+
+    ${YELLOW}deploy${NC} <env-file>   Deploy to production server
+    ${YELLOW}install${NC}             Install dockerized-laravel in a project
+
+    ${DIM}help${NC}                Show this help message
+    ${DIM}version${NC}             Show version
+
+${BOLD}OPTIONS${NC}
+    -v, --verbose       Show detailed output
+    -q, --quiet         Suppress non-essential output
+    -e, --env <file>    Use a specific .env file
+    -h, --help          Show help for a command
+    --debug             Show debug information
+
+${BOLD}EXAMPLES${NC}
+    ./dock start                    # Start containers
+    ./dock start --verbose          # Start with detailed output
+    ./dock logs -f                  # Follow all logs
+    ./dock logs app                 # View app container logs
+    ./dock artisan migrate          # Run migrations
+    ./dock shell                    # Enter app container shell
+    ./dock shell mariadb            # Enter database container
+
+${BOLD}ENVIRONMENT${NC}
+    Configure via .env file:
+    - ${BLUE}SERVER${NC}      Server type: artisan, octane, fpm, nginx, caddy
+    - ${BLUE}SERVICES${NC}    Additional services: redis,mailpit,meilisearch
+    - ${BLUE}APP_ENV${NC}     Environment: local, staging, production
+
+EOF
+}
+
+show_command_help() {
+    local cmd="$1"
+    
+    case "$cmd" in
+        start)
+            cat << EOF
+${BOLD}dock start${NC} - Start application containers
+
+${BOLD}USAGE${NC}
+    ./dock start [options]
+
+${BOLD}OPTIONS${NC}
+    --build         Force rebuild containers
+    --no-cache      Build without using cache
+    -v, --verbose   Show detailed output
+    -q, --quiet     Suppress output
+
+${BOLD}DESCRIPTION${NC}
+    Starts all configured containers based on your .env settings.
+    Automatically handles Octane setup if SERVER=octane.
+
+EOF
+            ;;
+        stop)
+            cat << EOF
+${BOLD}dock stop${NC} - Stop application containers
+
+${BOLD}USAGE${NC}
+    ./dock stop [options]
+
+${BOLD}OPTIONS${NC}
+    -v, --verbose   Show detailed output
+    -q, --quiet     Suppress output
+
+${BOLD}DESCRIPTION${NC}
+    Stops and removes all containers for the current project.
+    Volumes are preserved by default.
+
+EOF
+            ;;
+        logs)
+            cat << EOF
+${BOLD}dock logs${NC} - View container logs
+
+${BOLD}USAGE${NC}
+    ./dock logs [service] [options]
+
+${BOLD}OPTIONS${NC}
+    -f, --follow    Follow log output
+    -n, --tail <N>  Number of lines to show (default: 100)
+
+${BOLD}EXAMPLES${NC}
+    ./dock logs              # All container logs
+    ./dock logs app          # Only app container
+    ./dock logs -f           # Follow all logs
+    ./dock logs app -f -n 50 # Follow app logs, last 50 lines
+
+EOF
+            ;;
+        deploy)
+            cat << EOF
+${BOLD}dock deploy${NC} - Deploy to production
+
+${BOLD}USAGE${NC}
+    ./dock deploy <env-file>
+
+${BOLD}ARGUMENTS${NC}
+    env-file    Path to the production .env file
+
+${BOLD}DESCRIPTION${NC}
+    Deploys the application to a production server.
+    Requires REPO_URL, BRANCH, and DEPLOY_DIR in the env file.
+
+${BOLD}EXAMPLE${NC}
+    ./dock deploy /path/to/production.env
+
+EOF
+            ;;
+        *)
+            show_help
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# Command: start
+# -----------------------------------------------------------------------------
+cmd_start() {
+    local build=false
+    local no_cache=false
+    
+    # Parse command-specific options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --build)    build=true; shift ;;
+            --no-cache) no_cache=true; shift ;;
+            -h|--help)  show_command_help start; return 0 ;;
+            *)          shift ;;
+        esac
+    done
+    
+    print_header "Dockerized Laravel"
+    
+    # Load and validate environment
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    validate_full_env "start" || return 1
+    
+    # Run pre-flight checks
+    run_preflight_checks "start" "$PROJECT_ROOT" || return 1
+    
+    # Print configuration
+    print_env_summary
+    
+    # Start containers
+    print_section "${ICON_PACKAGE} Starting Containers"
+    
+    start_spinner "Starting containers..."
+    docker_up "$build"
+    local exit_code=$?
+    stop_spinner
+    
+    if [[ $exit_code -ne 0 ]]; then
+        print_error "Failed to start containers"
+        return 1
+    fi
+    
+    # Give containers a moment to initialize
+    sleep 2
+    
+    # Print status
+    print_container_status
+    
+    # Handle server-specific setup
+    if [[ "${SERVER:-artisan}" == "octane" ]]; then
+        setup_octane
+    fi
+    
+    # Standard provisioning
+    provision_app
+    
+    # Handle artisan serve mode (interactive)
+    if [[ "${SERVER:-artisan}" == "artisan" ]]; then
+        print_ready "http://localhost:${APP_PORT:-8000}"
+        print_info "Starting artisan serve (Ctrl+C to stop)..."
+        docker exec -it "${CONTAINER_NAME}" php artisan serve --host=0.0.0.0 --port=80
+    else
+        print_ready "http://localhost:${APP_PORT:-8000}"
+    fi
+}
+
+# Setup Octane server
+setup_octane() {
+    print_verbose "Setting up Octane..."
+    
+    # Check if Octane is installed
+    if ! check_octane_installed; then
+        print_info "Installing Laravel Octane..."
+        docker exec "${CONTAINER_NAME}" composer require laravel/octane 2>/dev/null
+        docker exec "${CONTAINER_NAME}" php artisan octane:install --server=frankenphp -q 2>/dev/null
+    fi
+    
+    # Link FrankenPHP binary
+    print_verbose "Linking FrankenPHP binary..."
+    docker exec "${CONTAINER_NAME}" mkdir -p vendor/laravel/octane/bin 2>/dev/null
+    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-x86_64 2>/dev/null
+    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-aarch64 2>/dev/null
+    
+    # Restart octane service
+    docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/supervisord.conf restart octane 2>/dev/null || true
+}
+
+# Provision the application
+provision_app() {
+    print_verbose "Provisioning application..."
+    
+    # Create directories
+    docker exec "${CONTAINER_NAME}" mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/app/public 2>/dev/null || true
+    
+    # Set permissions
+    docker exec "${CONTAINER_NAME}" chmod -R 775 storage bootstrap/cache public 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/ 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX public/ 2>/dev/null || true
+    
+    # Generate key if needed
+    if [[ -z "${APP_KEY:-}" ]]; then
+        print_verbose "Generating application key..."
+        docker exec "${CONTAINER_NAME}" php artisan key:generate 2>/dev/null || true
+    fi
+    
+    # Storage link
+    docker exec "${CONTAINER_NAME}" php artisan storage:link --force 2>/dev/null || true
+    
+    # Clear caches in local env
+    if is_local_env; then
+        print_verbose "Clearing caches for local development..."
+        docker exec "${CONTAINER_NAME}" php artisan optimize:clear 2>/dev/null || true
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Command: stop
+# -----------------------------------------------------------------------------
+cmd_stop() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help) show_command_help stop; return 0 ;;
+            *) shift ;;
+        esac
+    done
+    
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    
+    print_info "Stopping containers..."
+    docker_down
+    print_success "Containers stopped"
+}
+
+# -----------------------------------------------------------------------------
+# Command: restart
+# -----------------------------------------------------------------------------
+cmd_restart() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    
+    print_info "Restarting containers..."
+    docker_restart
+    print_success "Containers restarted"
+}
+
+# -----------------------------------------------------------------------------
+# Command: status
+# -----------------------------------------------------------------------------
+cmd_status() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    
+    print_header "Container Status"
+    print_container_status
+    
+    print_nl
+    print_section "${ICON_INFO} Details"
+    docker_status
+}
+
+# -----------------------------------------------------------------------------
+# Command: logs
+# -----------------------------------------------------------------------------
+cmd_logs() {
+    local service=""
+    local follow=false
+    local tail=100
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=true; shift ;;
+            -n|--tail)   tail="$2"; shift 2 ;;
+            -h|--help)   show_command_help logs; return 0 ;;
+            -*)          shift ;;
+            *)           service="$1"; shift ;;
+        esac
+    done
+    
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker_logs "$service" "$follow" "$tail"
+}
+
+# -----------------------------------------------------------------------------
+# Command: shell
+# -----------------------------------------------------------------------------
+cmd_shell() {
+    local container="${1:-${CONTAINER_NAME}}"
+    
+    # Handle container name shortcuts
+    if [[ "$container" != "${CONTAINER_NAME}" ]] && [[ "$container" != "${CONTAINER_NAME}-"* ]]; then
+        container="${CONTAINER_NAME}-${container}"
+    fi
+    
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    
+    print_info "Opening shell in ${container}..."
+    docker exec -it "$container" bash || docker exec -it "$container" sh
+}
+
+# -----------------------------------------------------------------------------
+# Command: exec
+# -----------------------------------------------------------------------------
+cmd_exec() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker_exec "${CONTAINER_NAME}" "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: artisan
+# -----------------------------------------------------------------------------
+cmd_artisan() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker exec -it "${CONTAINER_NAME}" php artisan "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: composer
+# -----------------------------------------------------------------------------
+cmd_composer() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker exec -it "${CONTAINER_NAME}" composer "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: npm
+# -----------------------------------------------------------------------------
+cmd_npm() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker exec -it "${CONTAINER_NAME}" npm "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: tinker
+# -----------------------------------------------------------------------------
+cmd_tinker() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker exec -it "${CONTAINER_NAME}" php artisan tinker
+}
+
+# -----------------------------------------------------------------------------
+# Command: migrate
+# -----------------------------------------------------------------------------
+cmd_migrate() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    docker exec -it "${CONTAINER_NAME}" php artisan migrate "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: fresh
+# -----------------------------------------------------------------------------
+cmd_fresh() {
+    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
+    
+    if ! is_local_env; then
+        print_warning "Running migrate:fresh in ${APP_ENV} environment!"
+        confirm "This will DELETE ALL DATA. Are you sure?" || return 1
+    fi
+    
+    docker exec -it "${CONTAINER_NAME}" php artisan migrate:fresh --seed "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Command: deploy
+# -----------------------------------------------------------------------------
+cmd_deploy() {
+    local env_file="$1"
+    
+    if [[ -z "$env_file" ]]; then
+        print_error "Missing argument: path to production .env file"
+        show_command_help deploy
+        return 1
+    fi
+    
+    if [[ ! -f "$env_file" ]]; then
+        print_error "Environment file not found: ${env_file}"
+        return 1
+    fi
+    
+    print_header "Deployment"
+    
+    # Load production env
+    load_env "$env_file" || return 1
+    validate_full_env "deploy" || return 1
+    
+    print_section "${ICON_GEAR} Configuration"
+    print_kv "Repository" "${REPO_URL}"
+    print_kv "Branch" "${BRANCH:-main}"
+    print_kv "Deploy Dir" "${DEPLOY_DIR}"
+    
+    confirm "Proceed with deployment?" || return 1
+    
+    print_nl
+    print_section "${ICON_PACKAGE} Deploying"
+    
+    # Create temp directory
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    register_cleanup "rm -rf $tmp_dir"
+    
+    # Clone repository
+    print_info "Cloning repository..."
+    if ! git clone --depth 1 -b "${BRANCH:-main}" "${REPO_URL}" "$tmp_dir" 2>&1 | grep -v "^$"; then
+        print_error "Failed to clone repository"
+        return 1
+    fi
+    print_success "Repository cloned"
+    
+    # Sync files
+    print_info "Syncing files..."
+    rsync -av --no-perms --no-owner --no-group --delete "${tmp_dir}/" "${DEPLOY_DIR}" 2>&1 | tail -5
+    print_success "Files synced"
+    
+    # Backup and copy env
+    if [[ -f "${DEPLOY_DIR}/.env" ]]; then
+        mv "${DEPLOY_DIR}/.env" "${DEPLOY_DIR}/.env.bak"
+    fi
+    cp "$env_file" "${DEPLOY_DIR}/.env"
+    
+    # Set permissions
+    chmod -R 770 "${DEPLOY_DIR}"
+    
+    # Change to deploy dir and start
+    cd "${DEPLOY_DIR}" || return 1
+    
+    print_info "Starting application..."
+    ./dock start
+    
+    print_success "Deployment complete!"
+}
+
+# -----------------------------------------------------------------------------
+# Command: install
+# -----------------------------------------------------------------------------
+cmd_install() {
+    print_header "Install Dockerized Laravel"
+    
+    # Source the configure script functionality
+    if [[ -f "${PROJECT_ROOT}/configure-app.sh" ]]; then
+        bash "${PROJECT_ROOT}/configure-app.sh"
+    else
+        print_error "Installation script not found"
+        return 1
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Main Argument Parsing
+# -----------------------------------------------------------------------------
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -q|--quiet)
+                QUIET=true
+                shift
+                ;;
+            --debug)
+                DEBUG=true
+                VERBOSE=true
+                shift
+                ;;
+            -e|--env)
+                ENV_FILE="$2"
+                shift 2
+                ;;
+            -h|--help)
+                if [[ -n "$COMMAND" ]]; then
+                    show_command_help "$COMMAND"
+                else
+                    show_help
+                fi
+                exit 0
+                ;;
+            -V|--version|version)
+                echo "dock v${VERSION}"
+                exit 0
+                ;;
+            -*)
+                # Unknown option, pass to command
+                ARGS+=("$1")
+                shift
+                ;;
+            *)
+                if [[ -z "$COMMAND" ]]; then
+                    COMMAND="$1"
+                else
+                    ARGS+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+}
+
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
+main() {
+    parse_args "$@"
+    
+    # Export globals for library functions
+    export VERBOSE QUIET DEBUG
+    
+    # Default to help if no command
+    if [[ -z "$COMMAND" ]]; then
+        show_help
+        exit 0
+    fi
+    
+    # Change to project root
+    cd "$PROJECT_ROOT" || exit 1
+    
+    # Dispatch command
+    case "$COMMAND" in
+        start)    cmd_start "${ARGS[@]}" ;;
+        stop)     cmd_stop "${ARGS[@]}" ;;
+        restart)  cmd_restart "${ARGS[@]}" ;;
+        status)   cmd_status "${ARGS[@]}" ;;
+        logs)     cmd_logs "${ARGS[@]}" ;;
+        shell|sh) cmd_shell "${ARGS[@]}" ;;
+        exec)     cmd_exec "${ARGS[@]}" ;;
+        artisan)  cmd_artisan "${ARGS[@]}" ;;
+        composer) cmd_composer "${ARGS[@]}" ;;
+        npm)      cmd_npm "${ARGS[@]}" ;;
+        tinker)   cmd_tinker "${ARGS[@]}" ;;
+        migrate)  cmd_migrate "${ARGS[@]}" ;;
+        fresh)    cmd_fresh "${ARGS[@]}" ;;
+        deploy)   cmd_deploy "${ARGS[@]}" ;;
+        install)  cmd_install "${ARGS[@]}" ;;
+        help)     show_help ;;
+        *)
+            print_error "Unknown command: ${COMMAND}"
+            print_info "Run './dock help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

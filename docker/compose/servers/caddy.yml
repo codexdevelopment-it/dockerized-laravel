@@ -1,0 +1,35 @@
+# =============================================================================
+# Caddy Server
+# Modern web server with automatic HTTPS
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Caddy Web Server / Reverse Proxy
+  # ---------------------------------------------------------------------------
+  caddy:
+    container_name: '${CONTAINER_NAME}-caddy'
+    image: caddy:alpine
+    restart: '${RESTART_POLICY:-no}'
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - '../config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro'
+      - '../../:/var/www/${CONTAINER_NAME}'
+      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/${CONTAINER_NAME}/storage'
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    networks:
+      - app-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local

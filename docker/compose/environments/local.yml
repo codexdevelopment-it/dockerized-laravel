@@ -1,0 +1,43 @@
+# =============================================================================
+# Local Development Environment
+# Optimized for development workflow
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application - Local Development Overrides
+  # ---------------------------------------------------------------------------
+  app:
+    volumes:
+      # Mount entire project for live reload
+      - '../../:/var/www/${CONTAINER_NAME}'
+      # Environment-specific PHP configuration
+      - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
+      - '../config/php/local.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'
+      # Environment-specific supervisor configuration
+      - '../config/supervisor/base.conf:/etc/supervisor/conf.d/00-base.conf:ro'
+      - '../config/supervisor/local.conf:/etc/supervisor/conf.d/01-programs.conf:ro'
+    environment:
+      - PHP_IDE_CONFIG=serverName=docker
+      - XDEBUG_MODE=${XDEBUG_MODE:-off}
+
+  # ---------------------------------------------------------------------------
+  # Database - Local Development Overrides
+  # ---------------------------------------------------------------------------
+  mariadb:
+    ports:
+      # Expose database port for local tools (TablePlus, DBeaver, etc.)
+      - '${DB_PORT:-3306}:3306'
+    environment:
+      # Allow empty password in development
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+    volumes:
+      # Persist database data
+      - mariadb-data:/var/lib/mysql
+
+# =============================================================================
+# Volumes - Local Development
+# =============================================================================
+volumes:
+  mariadb-data:
+    driver: local

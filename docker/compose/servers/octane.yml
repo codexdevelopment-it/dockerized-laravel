@@ -1,0 +1,10 @@
+# =============================================================================
+# Laravel Octane Server (FrankenPHP)
+# High-performance application server
+# =============================================================================
+
+services:
+  app:
+    ports:
+      - '${APP_PORT:-8000}:8000'
+    # Octane is managed by supervisord (configured via environment-specific files)
