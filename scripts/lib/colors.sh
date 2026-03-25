@@ -101,15 +101,13 @@ print_info() {
 # Print a header box
 print_header() {
     local title="$1"
-    local width=${2:-45}
-    local padding=$(( (width - ${#title} - 2) / 2 ))
     
     [[ "${QUIET:-false}" == "true" ]] && return 0
     
     echo ""
-    echo -e "${CYAN}╭$( printf '─%.0s' $(seq 1 $width) )╮${NC}"
-    echo -e "${CYAN}│${NC}$(printf ' %.0s' $(seq 1 $padding))${BOLD}${ICON_DOCKER} ${title}${NC}$(printf ' %.0s' $(seq 1 $(( width - ${#title} - padding - 3 )) ))${CYAN}│${NC}"
-    echo -e "${CYAN}╰$( printf '─%.0s' $(seq 1 $width) )╯${NC}"
+    echo -e "${CYAN}╭──────────────────────────────────────────╮${NC}"
+    echo -e "${CYAN}│${NC}  ${BOLD}${ICON_DOCKER} ${title}${NC}"
+    echo -e "${CYAN}╰──────────────────────────────────────────╯${NC}"
     echo ""
 }
 

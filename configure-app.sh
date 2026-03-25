@@ -47,36 +47,35 @@ SKIP_CONFIRM=false
 # Help
 # -----------------------------------------------------------------------------
 show_help() {
-    cat << EOF
-${BOLD}${ICON_DOCKER} Dockerized Laravel Installer${NC} v${VERSION}
-
-${BOLD}USAGE${NC}
-    ./configure-app.sh [options]
-    bash <(curl -s ${REPO_URL}/raw/main/configure-app.sh) [options]
-
-${BOLD}OPTIONS${NC}
-    -t, --type <new|existing>    Project type (new or existing Laravel app)
-    -n, --name <name>            Application name
-    -c, --container <name>       Container base name (e.g., 'myapp' -> 'myapp-mariadb')
-    -r, --repo <url>             Repository URL (for deployment)
-    -d, --database <name>        Database name (defaults to container name)
-    
-    --non-interactive            Run without prompts (requires all options)
-    -y, --yes                    Skip confirmation prompts
-    -h, --help                   Show this help message
-    -V, --version                Show version
-
-${BOLD}EXAMPLES${NC}
-    # Interactive mode
-    ./configure-app.sh
-
-    # Non-interactive: new project
-    ./configure-app.sh -t new -n "My App" -c myapp --non-interactive
-
-    # Non-interactive: existing project
-    ./configure-app.sh -t existing -n "My App" -c myapp -r https://github.com/user/repo --non-interactive
-
-EOF
+    echo ""
+    echo -e "${BOLD}${ICON_DOCKER} Dockerized Laravel Installer${NC} v${VERSION}"
+    echo ""
+    echo -e "${BOLD}USAGE${NC}"
+    echo "    ./configure-app.sh [options]"
+    echo "    bash <(curl -s ${REPO_URL}/raw/main/configure-app.sh) [options]"
+    echo ""
+    echo -e "${BOLD}OPTIONS${NC}"
+    echo "    -t, --type <new|existing>    Project type (new or existing Laravel app)"
+    echo "    -n, --name <name>            Application name"
+    echo "    -c, --container <name>       Container base name (e.g., 'myapp' -> 'myapp-mariadb')"
+    echo "    -r, --repo <url>             Repository URL (for deployment)"
+    echo "    -d, --database <name>        Database name (defaults to container name)"
+    echo ""
+    echo "    --non-interactive            Run without prompts (requires all options)"
+    echo "    -y, --yes                    Skip confirmation prompts"
+    echo "    -h, --help                   Show this help message"
+    echo "    -V, --version                Show version"
+    echo ""
+    echo -e "${BOLD}EXAMPLES${NC}"
+    echo "    # Interactive mode"
+    echo "    ./configure-app.sh"
+    echo ""
+    echo "    # Non-interactive: new project"
+    echo "    ./configure-app.sh -t new -n \"My App\" -c myapp --non-interactive"
+    echo ""
+    echo "    # Non-interactive: existing project"
+    echo "    ./configure-app.sh -t existing -n \"My App\" -c myapp -r https://github.com/user/repo --non-interactive"
+    echo ""
 }
 
 # -----------------------------------------------------------------------------
@@ -84,10 +83,10 @@ EOF
 # -----------------------------------------------------------------------------
 print_header() {
     echo ""
-    echo -e "${CYAN}╭────────────────────────────────────────────────╮${NC}"
-    echo -e "${CYAN}│${NC}   ${BOLD}${ICON_DOCKER} Dockerized Laravel Installer${NC}         ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}   ${DIM}v${VERSION}${NC}                                     ${CYAN}│${NC}"
-    echo -e "${CYAN}╰────────────────────────────────────────────────╯${NC}"
+    echo -e "${CYAN}╭──────────────────────────────────────────╮${NC}"
+    echo -e "${CYAN}│${NC}  ${BOLD}${ICON_DOCKER} Dockerized Laravel Installer${NC}"
+    echo -e "${CYAN}│${NC}  ${DIM}v${VERSION}${NC}"
+    echo -e "${CYAN}╰──────────────────────────────────────────╯${NC}"
     echo ""
 }
 
@@ -335,9 +334,9 @@ install_dockerized_laravel() {
     
     # Final message
     echo ""
-    echo -e "${GREEN}╭────────────────────────────────────────────────╮${NC}"
-    echo -e "${GREEN}│${NC}   ${BOLD}${ICON_CHECK} Installation Complete!${NC}                  ${GREEN}│${NC}"
-    echo -e "${GREEN}╰────────────────────────────────────────────────╯${NC}"
+    echo -e "${GREEN}╭──────────────────────────────────────────╮${NC}"
+    echo -e "${GREEN}│${NC}  ${BOLD}${ICON_CHECK} Installation Complete!${NC}"
+    echo -e "${GREEN}╰──────────────────────────────────────────╯${NC}"
     echo ""
     echo -e "  ${BOLD}Next steps:${NC}"
     echo -e "  ${DIM}1.${NC} cd ${CONTAINER_BASE_NAME:-$(pwd)}"

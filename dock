@@ -73,57 +73,56 @@ VERSION="2.0.0"
 # Help Text
 # -----------------------------------------------------------------------------
 show_help() {
-    cat << EOF
-${BOLD}${ICON_DOCKER} Dockerized Laravel CLI${NC} v${VERSION}
-
-${BOLD}USAGE${NC}
-    ./dock <command> [options] [arguments]
-
-${BOLD}COMMANDS${NC}
-    ${GREEN}start${NC}               Start the application containers
-    ${GREEN}stop${NC}                Stop all containers
-    ${GREEN}restart${NC}             Restart all containers
-    ${GREEN}status${NC}              Show container status
-    ${GREEN}logs${NC} [service]      View container logs (-f to follow)
-    ${GREEN}shell${NC} [container]   Open a shell in a container (default: app)
-    ${GREEN}exec${NC} <cmd>          Execute a command in the app container
-
-    ${CYAN}artisan${NC} <cmd>        Run Laravel Artisan command
-    ${CYAN}composer${NC} <cmd>       Run Composer command
-    ${CYAN}npm${NC} <cmd>            Run NPM command
-    ${CYAN}tinker${NC}               Start Laravel Tinker REPL
-    ${CYAN}migrate${NC}              Run database migrations
-    ${CYAN}fresh${NC}                Fresh migrate with seed
-
-    ${YELLOW}deploy${NC} <env-file>   Deploy to production server
-    ${YELLOW}install${NC}             Install dockerized-laravel in a project
-
-    ${DIM}help${NC}                Show this help message
-    ${DIM}version${NC}             Show version
-
-${BOLD}OPTIONS${NC}
-    -v, --verbose       Show detailed output
-    -q, --quiet         Suppress non-essential output
-    -e, --env <file>    Use a specific .env file
-    -h, --help          Show help for a command
-    --debug             Show debug information
-
-${BOLD}EXAMPLES${NC}
-    ./dock start                    # Start containers
-    ./dock start --verbose          # Start with detailed output
-    ./dock logs -f                  # Follow all logs
-    ./dock logs app                 # View app container logs
-    ./dock artisan migrate          # Run migrations
-    ./dock shell                    # Enter app container shell
-    ./dock shell mariadb            # Enter database container
-
-${BOLD}ENVIRONMENT${NC}
-    Configure via .env file:
-    - ${BLUE}SERVER${NC}      Server type: artisan, octane, fpm, nginx, caddy
-    - ${BLUE}SERVICES${NC}    Additional services: redis,mailpit,meilisearch
-    - ${BLUE}APP_ENV${NC}     Environment: local, staging, production
-
-EOF
+    echo ""
+    echo -e "${BOLD}${ICON_DOCKER} Dockerized Laravel CLI${NC} v${VERSION}"
+    echo ""
+    echo -e "${BOLD}USAGE${NC}"
+    echo "    ./dock <command> [options] [arguments]"
+    echo ""
+    echo -e "${BOLD}COMMANDS${NC}"
+    echo -e "    ${GREEN}start${NC}               Start the application containers"
+    echo -e "    ${GREEN}stop${NC}                Stop all containers"
+    echo -e "    ${GREEN}restart${NC}             Restart all containers"
+    echo -e "    ${GREEN}status${NC}              Show container status"
+    echo -e "    ${GREEN}logs${NC} [service]      View container logs (-f to follow)"
+    echo -e "    ${GREEN}shell${NC} [container]   Open a shell in a container (default: app)"
+    echo -e "    ${GREEN}exec${NC} <cmd>          Execute a command in the app container"
+    echo ""
+    echo -e "    ${CYAN}artisan${NC} <cmd>        Run Laravel Artisan command"
+    echo -e "    ${CYAN}composer${NC} <cmd>       Run Composer command"
+    echo -e "    ${CYAN}npm${NC} <cmd>            Run NPM command"
+    echo -e "    ${CYAN}tinker${NC}               Start Laravel Tinker REPL"
+    echo -e "    ${CYAN}migrate${NC}              Run database migrations"
+    echo -e "    ${CYAN}fresh${NC}                Fresh migrate with seed"
+    echo ""
+    echo -e "    ${YELLOW}deploy${NC} <env-file>   Deploy to production server"
+    echo -e "    ${YELLOW}install${NC}             Install dockerized-laravel in a project"
+    echo ""
+    echo -e "    ${DIM}help${NC}                Show this help message"
+    echo -e "    ${DIM}version${NC}             Show version"
+    echo ""
+    echo -e "${BOLD}OPTIONS${NC}"
+    echo "    -v, --verbose       Show detailed output"
+    echo "    -q, --quiet         Suppress non-essential output"
+    echo "    -e, --env <file>    Use a specific .env file"
+    echo "    -h, --help          Show help for a command"
+    echo "    --debug             Show debug information"
+    echo ""
+    echo -e "${BOLD}EXAMPLES${NC}"
+    echo "    ./dock start                    # Start containers"
+    echo "    ./dock start --verbose          # Start with detailed output"
+    echo "    ./dock logs -f                  # Follow all logs"
+    echo "    ./dock logs app                 # View app container logs"
+    echo "    ./dock artisan migrate          # Run migrations"
+    echo "    ./dock shell                    # Enter app container shell"
+    echo "    ./dock shell mariadb            # Enter database container"
+    echo ""
+    echo -e "${BOLD}ENVIRONMENT${NC}"
+    echo "    Configure via .env file:"
+    echo -e "    - ${BLUE}SERVER${NC}      Server type: artisan, octane, fpm, nginx, caddy"
+    echo -e "    - ${BLUE}SERVICES${NC}    Additional services: redis,mailpit,meilisearch"
+    echo -e "    - ${BLUE}APP_ENV${NC}     Environment: local, staging, production"
+    echo ""
 }
 
 show_command_help() {
@@ -131,78 +130,74 @@ show_command_help() {
     
     case "$cmd" in
         start)
-            cat << EOF
-${BOLD}dock start${NC} - Start application containers
-
-${BOLD}USAGE${NC}
-    ./dock start [options]
-
-${BOLD}OPTIONS${NC}
-    --build         Force rebuild containers
-    --no-cache      Build without using cache
-    -v, --verbose   Show detailed output
-    -q, --quiet     Suppress output
-
-${BOLD}DESCRIPTION${NC}
-    Starts all configured containers based on your .env settings.
-    Automatically handles Octane setup if SERVER=octane.
-
-EOF
+            echo ""
+            echo -e "${BOLD}dock start${NC} - Start application containers"
+            echo ""
+            echo -e "${BOLD}USAGE${NC}"
+            echo "    ./dock start [options]"
+            echo ""
+            echo -e "${BOLD}OPTIONS${NC}"
+            echo "    --build         Force rebuild containers"
+            echo "    --no-cache      Build without using cache"
+            echo "    -v, --verbose   Show detailed output"
+            echo "    -q, --quiet     Suppress output"
+            echo ""
+            echo -e "${BOLD}DESCRIPTION${NC}"
+            echo "    Starts all configured containers based on your .env settings."
+            echo "    Automatically handles Octane setup if SERVER=octane."
+            echo ""
             ;;
         stop)
-            cat << EOF
-${BOLD}dock stop${NC} - Stop application containers
-
-${BOLD}USAGE${NC}
-    ./dock stop [options]
-
-${BOLD}OPTIONS${NC}
-    -v, --verbose   Show detailed output
-    -q, --quiet     Suppress output
-
-${BOLD}DESCRIPTION${NC}
-    Stops and removes all containers for the current project.
-    Volumes are preserved by default.
-
-EOF
+            echo ""
+            echo -e "${BOLD}dock stop${NC} - Stop application containers"
+            echo ""
+            echo -e "${BOLD}USAGE${NC}"
+            echo "    ./dock stop [options]"
+            echo ""
+            echo -e "${BOLD}OPTIONS${NC}"
+            echo "    -v, --verbose   Show detailed output"
+            echo "    -q, --quiet     Suppress output"
+            echo ""
+            echo -e "${BOLD}DESCRIPTION${NC}"
+            echo "    Stops and removes all containers for the current project."
+            echo "    Volumes are preserved by default."
+            echo ""
             ;;
         logs)
-            cat << EOF
-${BOLD}dock logs${NC} - View container logs
-
-${BOLD}USAGE${NC}
-    ./dock logs [service] [options]
-
-${BOLD}OPTIONS${NC}
-    -f, --follow    Follow log output
-    -n, --tail <N>  Number of lines to show (default: 100)
-
-${BOLD}EXAMPLES${NC}
-    ./dock logs              # All container logs
-    ./dock logs app          # Only app container
-    ./dock logs -f           # Follow all logs
-    ./dock logs app -f -n 50 # Follow app logs, last 50 lines
-
-EOF
+            echo ""
+            echo -e "${BOLD}dock logs${NC} - View container logs"
+            echo ""
+            echo -e "${BOLD}USAGE${NC}"
+            echo "    ./dock logs [service] [options]"
+            echo ""
+            echo -e "${BOLD}OPTIONS${NC}"
+            echo "    -f, --follow    Follow log output"
+            echo "    -n, --tail <N>  Number of lines to show (default: 100)"
+            echo ""
+            echo -e "${BOLD}EXAMPLES${NC}"
+            echo "    ./dock logs              # All container logs"
+            echo "    ./dock logs app          # Only app container"
+            echo "    ./dock logs -f           # Follow all logs"
+            echo "    ./dock logs app -f -n 50 # Follow app logs, last 50 lines"
+            echo ""
             ;;
         deploy)
-            cat << EOF
-${BOLD}dock deploy${NC} - Deploy to production
-
-${BOLD}USAGE${NC}
-    ./dock deploy <env-file>
-
-${BOLD}ARGUMENTS${NC}
-    env-file    Path to the production .env file
-
-${BOLD}DESCRIPTION${NC}
-    Deploys the application to a production server.
-    Requires REPO_URL, BRANCH, and DEPLOY_DIR in the env file.
-
-${BOLD}EXAMPLE${NC}
-    ./dock deploy /path/to/production.env
-
-EOF
+            echo ""
+            echo -e "${BOLD}dock deploy${NC} - Deploy to production"
+            echo ""
+            echo -e "${BOLD}USAGE${NC}"
+            echo "    ./dock deploy <env-file>"
+            echo ""
+            echo -e "${BOLD}ARGUMENTS${NC}"
+            echo "    env-file    Path to the production .env file"
+            echo ""
+            echo -e "${BOLD}DESCRIPTION${NC}"
+            echo "    Deploys the application to a production server."
+            echo "    Requires REPO_URL, BRANCH, and DEPLOY_DIR in the env file."
+            echo ""
+            echo -e "${BOLD}EXAMPLE${NC}"
+            echo "    ./dock deploy /path/to/production.env"
+            echo ""
             ;;
         *)
             show_help
