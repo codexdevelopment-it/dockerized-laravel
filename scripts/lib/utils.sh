@@ -117,7 +117,9 @@ confirm() {
     echo -n -e "${YELLOW}${prompt}${NC} ${yn_prompt} "
     read -r response
     
-    case "${response,,}" in
+    # Use tr for bash 3.x compatibility (macOS default)
+    response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+    case "$response" in
         y|yes) return 0 ;;
         n|no)  return 1 ;;
         "")
@@ -176,9 +178,9 @@ select_option() {
 # String Utilities
 # -----------------------------------------------------------------------------
 
-# Convert string to lowercase
+# Convert string to lowercase (bash 3.x compatible)
 lowercase() {
-    echo "${1,,}"
+    echo "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 # Convert string to uppercase

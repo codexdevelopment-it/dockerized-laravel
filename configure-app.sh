@@ -207,7 +207,9 @@ confirm_proceed() {
     fi
     
     read -r -p "$(echo -e "${YELLOW}Proceed with installation?${NC} [Y/n]: ")" response
-    case "${response,,}" in
+    # Use tr for bash 3.x compatibility (macOS default)
+    response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+    case "$response" in
         n|no) return 1 ;;
         *)    return 0 ;;
     esac
