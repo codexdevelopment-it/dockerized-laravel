@@ -237,15 +237,25 @@ cmd_start() {
     # Start containers
     print_section "${ICON_PACKAGE} Starting Containers"
     
-    start_spinner "Starting containers..."
-    docker_up "$build"
-    local exit_code=$?
-    stop_spinner
+    if [[ "${VERBOSE:-false}" == "true" ]]; then
+        # In verbose mode, show all output directly
+        print_info "Starting containers..."
+        docker_up "$build"
+        local exit_code=$?
+    else
+        # In normal mode, use spinner
+        start_spinner "Starting containers..."
+        docker_up "$build" > /dev/null 2>&1
+        local exit_code=$?
+        stop_spinner
+    fi
     
     if [[ $exit_code -ne 0 ]]; then
         print_error "Failed to start containers"
         return 1
     fi
+    
+    print_success "Containers started"
     
     # Give containers a moment to initialize
     sleep 2

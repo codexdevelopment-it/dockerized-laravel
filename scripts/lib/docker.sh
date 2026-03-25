@@ -25,9 +25,18 @@ build_compose_command() {
     local env_file
     env_file=$(get_env_compose_file)
     
+    print_verbose "Project root: ${project_root}"
+    print_verbose "Compose dir: ${compose_dir}"
+    
     # Start with base compose file
     local cmd="docker compose"
-    cmd+=" -f ${compose_dir}/base.yml"
+    
+    local base_compose="${compose_dir}/base.yml"
+    if [[ ! -f "$base_compose" ]]; then
+        print_error "Base compose file not found: ${base_compose}"
+        return 1
+    fi
+    cmd+=" -f ${base_compose}"
     
     # Add environment-specific compose file (try new location first)
     local env_compose="${compose_dir}/environments/${env_file}.yml"
