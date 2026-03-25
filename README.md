@@ -1,193 +1,102 @@
 # 🐳 Dockerized Laravel
 
-A powerful utility to easily dockerize Laravel applications for both local development and production environments. Features automatic Octane setup, environment-specific optimizations, and a beautiful CLI interface.
-
-## Features
-
-- **🚀 Multiple Server Modes**: artisan serve, Laravel Octane (FrankenPHP), PHP-FPM, Nginx, Caddy
-- **🔧 Environment-Specific Configs**: Different PHP/OPcache settings for local vs production
-- **📦 Modular Services**: Add Redis, Mailpit, Meilisearch, phpMyAdmin as needed
-- **🔄 Hot Reload**: Automatic code reloading in local development
-- **🎨 Beautiful CLI**: Color-coded output, progress indicators, helpful commands
+Dockerize any Laravel application in seconds. One command to set up a complete development environment with production-ready optimizations.
 
 ## Quick Start
 
-### Installation
-
 ```bash
-# One-liner installation
-bash <(curl -s https://raw.githubusercontent.com/Murkrow02/dockerized-laravel/main/configure-app.sh)
+# Install in your Laravel project
+bash <(curl -s https://raw.githubusercontent.com/codexdevelopment-it/dockerized-laravel/main/configure-app.sh)
 
-# Or with options
-bash <(curl -s https://raw.githubusercontent.com/Murkrow02/dockerized-laravel/main/configure-app.sh) \
-  -t existing -n "My App" -c myapp --non-interactive
-```
-
-### Starting Your Application
-
-```bash
-# Start with default settings (artisan serve)
+# Start the application
 ./dock start
-
-# Start with verbose output
-./dock start --verbose
-
-# Force rebuild containers
-./dock start --build
 ```
 
-## CLI Commands
+Your app is now running at `http://localhost:8000`
 
+## Commands
+
+```bash
+./dock start              # Start containers
+./dock stop               # Stop containers
+./dock restart            # Restart containers
+./dock status             # Show status
+./dock logs [-f]          # View logs
+./dock shell              # Shell into app container
+./dock shell mariadb      # Shell into database
+
+./dock artisan <cmd>      # Run artisan commands
+./dock composer <cmd>     # Run composer
+./dock npm <cmd>          # Run npm
+./dock tinker             # Laravel Tinker
+./dock migrate            # Run migrations
+./dock fresh              # Fresh migrate + seed
+./dock seed               # Run seeders
 ```
-./dock <command> [options]
-```
 
-### Container Management
-
-| Command | Description |
-|---------|-------------|
-| `start` | Start all containers |
-| `stop` | Stop all containers |
-| `restart` | Restart all containers |
-| `status` | Show container status |
-| `logs [service]` | View logs (`-f` to follow) |
-| `shell [container]` | Open shell in container |
-
-### Laravel Shortcuts
-
-| Command | Description |
-|---------|-------------|
-| `artisan <cmd>` | Run artisan command |
-| `composer <cmd>` | Run composer command |
-| `npm <cmd>` | Run npm command |
-| `tinker` | Start Tinker REPL |
-| `migrate` | Run migrations |
-| `fresh` | Migrate fresh with seed |
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-v, --verbose` | Detailed output |
-| `-q, --quiet` | Minimal output |
-| `-e, --env <file>` | Use specific env file |
-| `-h, --help` | Show help |
+Add `-v` or `--verbose` for detailed output.
 
 ## Configuration
 
-### Server Types
-
-Configure via `SERVER=` in `.env`:
-
-| Server | Description | Best For |
-|--------|-------------|----------|
-| `artisan` | `php artisan serve` | Quick development |
-| `octane` | Laravel Octane + FrankenPHP | Performance |
-| `fpm` | PHP-FPM (requires nginx/caddy) | Traditional setup |
-| `nginx` | Nginx + PHP-FPM | Full control |
-| `caddy` | Caddy + PHP-FPM + Auto HTTPS | Production |
-
-### Additional Services
-
-Configure via `SERVICES=` in `.env` (comma-separated):
+Edit `.env` to configure:
 
 ```env
-SERVICES=redis,mailpit,meilisearch
+CONTAINER_NAME=myapp      # Container prefix
+APP_ENV=local             # local | staging | production
+SERVER=octane             # artisan | octane | fpm | nginx | caddy
+SERVICES=redis,mailpit    # Additional services (comma-separated)
+APP_PORT=8000             # Application port
 ```
+
+### Server Types
+
+| Server | Use Case |
+|--------|----------|
+| `artisan` | Quick development with `php artisan serve` |
+| `octane` | High performance with FrankenPHP (recommended) |
+| `fpm` | Traditional PHP-FPM |
+| `nginx` | Nginx + PHP-FPM |
+| `caddy` | Caddy + PHP-FPM with automatic HTTPS |
+
+### Available Services
 
 | Service | Ports | Description |
 |---------|-------|-------------|
-| `redis` | 6379 | Redis cache/queue |
-| `mailpit` | 1025, 8025 | Mail testing |
+| `redis` | 6379 | Cache and queues |
+| `mailpit` | 1025, 8025 | Email testing (UI at :8025) |
 | `meilisearch` | 7700 | Full-text search |
-| `phpmyadmin` | 8080 | Database GUI |
+| `phpmyadmin` | 8080 | Database management |
 | `soketi` | 6001 | WebSocket server |
 
-### Environment Variables
-
-```env
-# Required
-CONTAINER_NAME=myapp          # Base name for containers
-APP_ENV=local                 # local, staging, production
-
-# Server
-SERVER=octane                 # Server type
-APP_PORT=8000                 # Application port
-
-# Database
-DB_DATABASE=myapp
-DB_USERNAME=app
-DB_PASSWORD=password
-
-# Deployment (production only)
-REPO_URL=https://github.com/user/repo
-BRANCH=main
-DEPLOY_DIR=/var/www/myapp
-```
-
-## Architecture
-
-```
-project/
-├── dock                      # CLI entrypoint
-├── .env                      # Configuration
-├── docker/
-│   ├── Dockerfile            # Multi-environment build
-│   ├── compose/
-│   │   ├── base.yml          # Core services
-│   │   ├── environments/     # Per-env overrides
-│   │   │   ├── local.yml
-│   │   │   ├── staging.yml
-│   │   │   └── production.yml
-│   │   ├── servers/          # Server configs
-│   │   │   ├── artisan.yml
-│   │   │   ├── octane.yml
-│   │   │   └── ...
-│   │   └── services/         # Optional services
-│   │       ├── redis.yml
-│   │       └── ...
-│   └── config/
-│       ├── php/              # Per-env PHP configs
-│       │   ├── base.ini
-│       │   ├── local.ini
-│       │   └── production.ini
-│       └── supervisor/       # Per-env supervisor
-│           ├── base.conf
-│           ├── local.conf
-│           └── production.conf
-└── scripts/
-    └── lib/                  # Shell libraries
-```
-
-## Environment-Specific Optimizations
-
-### Local Development
-
-- OPcache validates file timestamps (instant code changes)
-- JIT disabled (faster reload)
-- Octane runs with `--watch` flag
-- All ports exposed for tooling
-- Dev dependencies included
-
-### Production
-
-- OPcache never validates timestamps (max performance)
-- JIT enabled (tracing mode)
-- Route, config, view caches baked in
-- Only storage volumes mounted
-- Scheduler daemon included
-
-## Deployment
-
-### Production Deploy
+## Installation Options
 
 ```bash
-# Deploy using production env file
+# Interactive (asks questions)
+bash <(curl -s .../configure-app.sh)
+
+# Non-interactive for new project
+bash <(curl -s .../configure-app.sh) -t new -n "My App" -c myapp --non-interactive
+
+# Non-interactive for existing project
+bash <(curl -s .../configure-app.sh) -t existing -n "My App" --non-interactive
+```
+
+| Flag | Description |
+|------|-------------|
+| `-t, --type` | `new` or `existing` |
+| `-n, --name` | Application name |
+| `-c, --container` | Container base name |
+| `-d, --database` | Database name |
+| `-r, --repo` | Repository URL (for deployment) |
+| `--non-interactive` | Skip all prompts |
+
+## Production Deployment
+
+```bash
 ./dock deploy /path/to/production.env
 ```
 
-The production `.env` should include:
-
+Production `.env` requirements:
 ```env
 APP_ENV=production
 REPO_URL=https://github.com/user/repo
@@ -197,44 +106,68 @@ STORAGE_MOUNT_PATH=/data/storage
 DB_MOUNT_PATH=/data/mysql
 ```
 
+---
+
+## How It Works
+
+The CLI dynamically assembles Docker Compose configurations:
+
+```
+base.yml + environment/{local,staging,production}.yml + server/{artisan,octane,...}.yml + services/{redis,mailpit,...}.yml
+```
+
+### Project Structure
+
+```
+├── dock                    # CLI entrypoint
+├── .env                    # Configuration
+├── docker/
+│   ├── Dockerfile          # Multi-stage build
+│   ├── compose/
+│   │   ├── base.yml        # Core services (app + mariadb)
+│   │   ├── environments/   # Environment overrides
+│   │   ├── servers/        # Server-specific configs
+│   │   └── services/       # Optional services
+│   └── config/
+│       ├── php/            # PHP configs per environment
+│       └── supervisor/     # Supervisor configs per environment
+└── scripts/lib/            # Shell libraries
+```
+
+### Environment Optimizations
+
+| Setting | Local | Production |
+|---------|-------|------------|
+| OPcache timestamps | Validated (instant reload) | Disabled (max speed) |
+| JIT | Off | Tracing mode |
+| Octane | `--watch` flag | Persistent workers |
+| Caches | Cleared on start | Baked into image |
+| Code mount | Full project | Storage only |
+
 ## Requirements
 
-- Docker & Docker Compose V2
-- For deployment: `apt install rsync acl`
+- Docker with Compose V2
+- Bash 3.2+ (macOS default works)
 
 ## Troubleshooting
 
-### Ports Already In Use
-
+**Port in use:**
 ```bash
-# Check what's using a port
-lsof -i :8000
-
-# Use a different port
-APP_PORT=8080 ./dock start
+lsof -i :8000              # Find what's using it
+APP_PORT=8080 ./dock start # Use different port
 ```
 
-### Permission Issues
-
+**Permission issues:**
 ```bash
-# Inside container
 ./dock shell
 chmod -R 775 storage bootstrap/cache
 ```
 
-### OPcache Changes Not Reflecting
-
-In production, OPcache is permanent. To update code:
-
+**Code changes not reflecting (production):**
 ```bash
 ./dock restart
-# Or inside container:
-php artisan octane:reload
+# Or: ./dock artisan octane:reload
 ```
-
-## Contributing
-
-Contributions welcome! Please ensure your changes work across all environments (local, staging, production).
 
 ## License
 
