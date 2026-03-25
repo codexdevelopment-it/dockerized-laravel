@@ -71,9 +71,9 @@ print_msg() {
     echo -e "$*"
 }
 
-# Print only in verbose mode
+# Print only in verbose mode (to stderr so it doesn't interfere with command capture)
 print_verbose() {
-    [[ "${VERBOSE:-false}" == "true" ]] && echo -e "${DIM}$*${NC}"
+    [[ "${VERBOSE:-false}" == "true" ]] && echo -e "${DIM}$*${NC}" >&2
 }
 
 # Print a debug message (only when DEBUG=true)
