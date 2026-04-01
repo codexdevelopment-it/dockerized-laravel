@@ -112,7 +112,7 @@ docker_up() {
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         eval "$up_cmd"
     else
-        eval "$up_cmd" 2>&1 | head -20 || true
+        eval "$up_cmd" > /dev/null 2>&1
     fi
 }
 
@@ -130,7 +130,7 @@ docker_down() {
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         eval "${compose_cmd} down"
     else
-        eval "${compose_cmd} down" 2>&1 | head -10 || true
+        eval "${compose_cmd} down" > /dev/null 2>&1
     fi
 }
 
