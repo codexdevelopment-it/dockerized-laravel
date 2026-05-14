@@ -279,10 +279,11 @@ cmd_start() {
     # Print status (ignore errors - containers might not be labeled yet)
     print_container_status || true
     
-    # Handle server-specific setup
-    if [[ "${SERVER:-artisan}" == "octane" ]]; then
-        setup_octane || true
-    fi
+    # Handle server-specific setup. Octane is the actual app backend for
+    # octane/nginx/caddy modes (nginx & caddy just reverse-proxy to it).
+    case "${SERVER:-artisan}" in
+        octane|nginx|caddy) setup_octane || true ;;
+    esac
     
     # Standard provisioning
     provision_app || true
@@ -295,27 +296,31 @@ cmd_start() {
     else
         print_ready "http://localhost:${APP_PORT:-8000}"
     fi
+
+    return 0
 }
 
-# Setup Octane server
+# Setup Octane server.
+# All steps are best-effort: a failure here must NOT kill the deploy if the
+# containers are otherwise running. Add laravel/octane to composer.json of the
+# app to avoid the runtime install path entirely.
 setup_octane() {
     print_verbose "Setting up Octane..."
-    
-    # Check if Octane is installed
+
     if ! check_octane_installed; then
-        print_info "Installing Laravel Octane..."
-        docker exec "${CONTAINER_NAME}" composer require laravel/octane 2>/dev/null
-        docker exec "${CONTAINER_NAME}" php artisan octane:install --server=frankenphp -q 2>/dev/null
+        print_warning "laravel/octane not found in image - installing at runtime (slow + lost on rebuild)"
+        print_info "Fix: add 'laravel/octane' to composer.json and redeploy"
+        docker exec "${CONTAINER_NAME}" composer require laravel/octane 2>/dev/null || true
+        docker exec "${CONTAINER_NAME}" php artisan octane:install --server=frankenphp -q 2>/dev/null || true
     fi
-    
-    # Link FrankenPHP binary
+
     print_verbose "Linking FrankenPHP binary..."
-    docker exec "${CONTAINER_NAME}" mkdir -p vendor/laravel/octane/bin 2>/dev/null
-    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-x86_64 2>/dev/null
-    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-aarch64 2>/dev/null
-    
-    # Restart octane service
+    docker exec "${CONTAINER_NAME}" mkdir -p vendor/laravel/octane/bin 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-x86_64 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-aarch64 2>/dev/null || true
+
     docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/00-base.conf restart octane 2>/dev/null || true
+    return 0
 }
 
 # Provision the application
@@ -344,6 +349,8 @@ provision_app() {
         print_verbose "Clearing caches for local development..."
         docker exec "${CONTAINER_NAME}" php artisan optimize:clear 2>/dev/null || true
     fi
+
+    return 0
 }
 
 # -----------------------------------------------------------------------------
@@ -617,17 +624,39 @@ cmd_deploy() {
     fi
 
     # ---- Ensure mount paths + UID/GID ---------------------------------------
+    # Container must never run as UID 0. If host user is root (e.g. deploy on a
+    # bare VPS with no separate deploy user), fall back to 1000:1000 and chown
+    # storage to that UID so the container can write to it.
     local host_uid="${USER_ID:-$(id -u)}"
     local host_gid="${GROUP_ID:-$(id -g)}"
+    if [[ "$host_uid" == "0" ]]; then
+        print_warning "Running as root - using UID/GID 1000 for the container user"
+        print_info "    (run deploy as a non-root user to map host = container UID)"
+        host_uid=1000
+        host_gid=1000
+    fi
     local storage_path="${STORAGE_MOUNT_PATH:-${PROJECT_ROOT}/storage}"
     local db_path="${DB_MOUNT_PATH:-${PROJECT_ROOT}/db-data}"
 
     mkdir -p "$storage_path" "$db_path"
 
-    if ! grep -qE '^USER_ID=' "${PROJECT_ROOT}/.env"; then
+    # Write/replace USER_ID and GROUP_ID in .env so rebuilds match this run
+    if grep -qE '^USER_ID=' "${PROJECT_ROOT}/.env"; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "s|^USER_ID=.*|USER_ID=${host_uid}|" "${PROJECT_ROOT}/.env"
+        else
+            sed -i "s|^USER_ID=.*|USER_ID=${host_uid}|" "${PROJECT_ROOT}/.env"
+        fi
+    else
         echo "USER_ID=${host_uid}" >> "${PROJECT_ROOT}/.env"
     fi
-    if ! grep -qE '^GROUP_ID=' "${PROJECT_ROOT}/.env"; then
+    if grep -qE '^GROUP_ID=' "${PROJECT_ROOT}/.env"; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "s|^GROUP_ID=.*|GROUP_ID=${host_gid}|" "${PROJECT_ROOT}/.env"
+        else
+            sed -i "s|^GROUP_ID=.*|GROUP_ID=${host_gid}|" "${PROJECT_ROOT}/.env"
+        fi
+    else
         echo "GROUP_ID=${host_gid}" >> "${PROJECT_ROOT}/.env"
     fi
 

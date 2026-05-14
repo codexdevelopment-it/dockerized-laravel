@@ -1,12 +1,11 @@
 # =============================================================================
-# Nginx Server
-# Traditional nginx + PHP-FPM setup
+# Nginx Reverse Proxy
+# Forwards HTTP to the app container (FrankenPHP/Octane on port 8000).
+# Use this when you want a classic web-server front (logging, static caching,
+# rate limiting) without HTTPS termination. For HTTPS use the caddy server.
 # =============================================================================
 
 services:
-  # ---------------------------------------------------------------------------
-  # Nginx Web Server
-  # ---------------------------------------------------------------------------
   nginx:
     container_name: '${CONTAINER_NAME}-nginx'
     image: nginx:alpine
@@ -15,14 +14,15 @@ services:
       - '${APP_PORT:-8000}:80'
     volumes:
       - '../config/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro'
-      - '../../:/var/www/html'
-      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/html/storage'
+      # Mount project code so nginx can serve static assets from public/
+      - '../../:/var/www/html:ro'
+      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/html/storage:ro'
     depends_on:
       - app
     networks:
       - app-network
     healthcheck:
-      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost/']
+      test: ['CMD-SHELL', 'nc -z localhost 80 || exit 1']
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3

@@ -1,11 +1,13 @@
 # =============================================================================
-# PHP-FPM Server
-# Traditional PHP-FPM setup (requires nginx or caddy)
+# DEPRECATED: SERVER=fpm
+# The FrankenPHP base image does not ship php-fpm. SERVER=nginx and SERVER=caddy
+# now reverse-proxy HTTP to the app container's Octane backend instead of
+# speaking FastCGI. Use SERVER=nginx or SERVER=caddy directly.
+# This file is kept only so SERVER=fpm doesn't break: it adds nothing on top of
+# the base octane setup, so the app container will run octane on port 8000.
 # =============================================================================
 
 services:
   app:
-    # FPM listens on socket/port, requires a web server in front
-    # Use this with nginx.yml or caddy.yml server compose files
-    volumes:
-      - '../config/fpm/pool.conf:/usr/local/etc/php-fpm.d/www.conf:ro'
+    ports:
+      - '${APP_PORT:-8000}:8000'

@@ -1,6 +1,7 @@
 # =============================================================================
-# Caddy Server
-# Modern web server with automatic HTTPS
+# Caddy Reverse Proxy
+# Automatic HTTPS via Let's Encrypt + reverse proxy to the app container
+# (FrankenPHP/Octane on port 8000). Set DOMAIN in .env to enable HTTPS.
 # =============================================================================
 
 services:

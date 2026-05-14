@@ -65,13 +65,28 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 RUN install-php-extensions \
     pdo_pgsql pdo_mysql gd intl zip opcache redis pcntl bcmath exif calendar mbstring
 
-# Create laravel user matching host UID/GID to avoid storage permission issues
-RUN if getent group ${GROUP_ID} >/dev/null; then \
+# Create laravel user matching host UID/GID to avoid storage permission issues.
+# UID 0 is rejected on purpose - we never run app as root inside the container.
+RUN if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
+        echo "ERROR: USER_ID/GROUP_ID must not be 0 (refusing to run as root)" >&2; \
+        exit 1; \
+    fi && \
+    # If GID already exists, reuse its group name; otherwise create one.
+    if getent group ${GROUP_ID} >/dev/null; then \
         EXISTING_GROUP=$(getent group ${GROUP_ID} | cut -d: -f1); \
-        useradd -u ${USER_ID} -g ${EXISTING_GROUP} -m laravel; \
     else \
-        groupadd -g ${GROUP_ID} laravel && \
-        useradd -u ${USER_ID} -g ${GROUP_ID} -m laravel; \
+        groupadd -g ${GROUP_ID} laravel; \
+        EXISTING_GROUP=laravel; \
+    fi && \
+    # If UID already exists, rename that user to laravel; otherwise create one.
+    if getent passwd ${USER_ID} >/dev/null; then \
+        EXISTING_USER=$(getent passwd ${USER_ID} | cut -d: -f1); \
+        if [ "$EXISTING_USER" != "laravel" ]; then \
+            usermod -l laravel -d /home/laravel -m "$EXISTING_USER" || true; \
+            groupmod -n laravel "$EXISTING_USER" 2>/dev/null || true; \
+        fi; \
+    else \
+        useradd -u ${USER_ID} -g ${EXISTING_GROUP} -m laravel; \
     fi && \
     usermod -aG www-data laravel
 

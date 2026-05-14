@@ -52,11 +52,13 @@ APP_PORT=8000             # Application port
 
 | Server | Use Case |
 |--------|----------|
-| `artisan` | Quick development with `php artisan serve` |
-| `octane` | High performance with FrankenPHP (recommended) |
-| `fpm` | Traditional PHP-FPM |
-| `nginx` | Nginx + PHP-FPM |
-| `caddy` | Caddy + PHP-FPM with automatic HTTPS |
+| `artisan` | Quick dev (`php artisan serve`) |
+| `octane` | App exposed directly (FrankenPHP HTTP on `APP_PORT`) — **recommended for simple setups** |
+| `nginx` | Nginx reverse proxy in front of octane (classic logging, static caching) |
+| `caddy` | Caddy reverse proxy in front of octane — automatic HTTPS via `DOMAIN` |
+| `fpm` | Deprecated alias for `octane`. The FrankenPHP base does not ship php-fpm. |
+
+**All three production-grade servers (`octane`, `nginx`, `caddy`) run the same app container** — FrankenPHP/Octane on port 8000. `nginx` and `caddy` are just reverse proxies on top. This means `laravel/octane` must be in your `composer.json` regardless of the server mode you pick.
 
 ### Available Services
 
@@ -264,6 +266,7 @@ These are known gaps tracked for future work (not blocking the current deploy):
 - **Optional pre/post hooks**: `scripts/deploy/before.sh`, `scripts/deploy/after.sh` so apps can plug in extra steps (e.g. flush CDN, warm cache).
 
 ### Build / runtime
+- **True PHP-FPM mode**: would require switching the base image away from FrankenPHP (e.g. `php:8.3-fpm`) and re-introducing `php-fpm` as a supervisor program. Only worth doing if you really need classic FPM (e.g. integrating with an existing FPM-only ops stack). The current proxy-to-octane approach is simpler and faster.
 - **Pin `mariadb:latest`** to a major version (e.g. `mariadb:11.4`).
 - **Xdebug** install gated by `XDEBUG_MODE` (currently env var is wired but extension not installed).
 - **Multi-arch image builds** (amd64 + arm64) via buildx, with arch-detected octane symlinks (currently both are linked unconditionally).
