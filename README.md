@@ -92,141 +92,155 @@ bash <(curl -s .../configure-app.sh) -t existing -n "My App" --non-interactive
 
 ## Production Deployment
 
-End-to-end guide for a fresh Linux server (Ubuntu/Debian assumed; Fedora/Arch similar).
+The deploy is dead simple: **clone the repo to the server once, edit `.env`, then `./dock deploy` forever after.** Every subsequent deploy is the same single command.
 
-### 1. Server prerequisites (one-time)
+### 1. Prepare the server (one-time)
 
 ```bash
 # Docker + Compose V2
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
-newgrp docker            # or log out/in
+newgrp docker                   # or log out / back in
 
-# Git (for the deploy clone)
-sudo apt-get install -y git rsync openssl
-
-# Verify
-docker compose version
+sudo apt-get install -y git openssl
+docker compose version          # verify
 ```
 
-If you use a **private repo**, set up SSH access on the server:
+If your app repo is **private**, give the server an SSH key:
 
 ```bash
 ssh-keygen -t ed25519 -C "deploy@$(hostname)"
-cat ~/.ssh/id_ed25519.pub        # add as a deploy key in GitHub/GitLab
-ssh -T git@github.com            # accept fingerprint
+cat ~/.ssh/id_ed25519.pub       # add this as a deploy key in GitHub/GitLab
+ssh -T git@github.com           # accept fingerprint
 ```
 
-### 2. Pick paths
+### 2. Clone your app once
 
-| Variable | Purpose | Example |
-|---|---|---|
-| `DEPLOY_DIR` | Where the app lives | `/var/www/myapp` |
-| `STORAGE_MOUNT_PATH` | Persistent `storage/` (uploads, logs) | `/var/data/myapp/storage` |
-| `DB_MOUNT_PATH` | MariaDB data dir | `/var/data/myapp/db` |
+```bash
+sudo mkdir -p /var/www && sudo chown $USER /var/www
+cd /var/www
+git clone git@github.com:you/myapp.git
+cd myapp
+```
 
-The deploy script will create them if missing and `chown` them to the container user. **Avoid putting them inside `DEPLOY_DIR`** if you want rsync to be safe — keep data in `/var/data/...`.
+(Your app repo should already have `dock` + `scripts/` + `docker/` committed — those are produced by the installer when the project was first set up.)
 
-### 3. Bootstrap a `production.env`
+### 3. Create the production `.env`
 
-On your **local machine** (or anywhere with this repo), copy `.env` to e.g. `~/myapp.prod.env` and edit:
+In the same dir:
+
+```bash
+cp .env.example .env            # or scp it up from your laptop
+nano .env
+```
+
+Minimum required values:
 
 ```env
 APP_NAME="My App"
 APP_ENV=production
 APP_DEBUG=false
 APP_URL=https://app.example.com
-APP_KEY=                                # leave empty — deploy generates one
+APP_KEY=                        # leave blank, deploy will generate one
 
-CONTAINER_NAME=myapp
-SERVER=octane                           # recommended: octane (FrankenPHP)
-SERVICES=redis
+CONTAINER_NAME=myapp            # used as container prefix
+SERVER=octane                   # octane | caddy | nginx | fpm | artisan
+SERVICES=redis                  # comma-separated optional services
 
-# Deploy
-REPO_URL=git@github.com:you/myapp.git
-BRANCH=main
-DEPLOY_DIR=/var/www/myapp
-DOMAIN=app.example.com                  # used by Caddy for auto-HTTPS
+DOMAIN=app.example.com          # used by Caddy for auto-HTTPS
+BRANCH=main                     # branch to pull on each deploy
 
-STORAGE_MOUNT_PATH=/var/data/myapp/storage
-DB_MOUNT_PATH=/var/data/myapp/db
-
-# DB
 DB_DATABASE=myapp
 DB_USERNAME=app
-DB_PASSWORD=<strong-password>           # change this!
+DB_PASSWORD=<strong-password>
 
-# Optional: pin to host UID/GID (auto-detected if omitted)
-# USER_ID=1000
-# GROUP_ID=1000
+# Optional - absolute paths recommended on a real server.
+# Defaults to ./storage and ./db-data inside this directory.
+# STORAGE_MOUNT_PATH=/var/data/myapp/storage
+# DB_MOUNT_PATH=/var/data/myapp/db
 ```
-
-Copy it to the server:
 
 ```bash
-scp ~/myapp.prod.env user@server:~/myapp.prod.env
-chmod 600 ~/myapp.prod.env              # on the server
+chmod 600 .env
 ```
 
-### 4. Get the dock CLI on the server
-
-You only need the `dock` script + `scripts/` dir + `docker/` dir for the **first** deploy (subsequent deploys overwrite them from your app repo):
+### 4. Deploy
 
 ```bash
-ssh user@server
-bash <(curl -s https://raw.githubusercontent.com/codexdevelopment-it/dockerized-laravel/main/configure-app.sh) \
-    -t existing -n "My App" -c myapp --non-interactive
-cd myapp
+./dock deploy
 ```
 
-Or just `git clone` your app repo (which already has `dock` baked in after the install step) to a scratch dir.
+That's it. The command will:
 
-### 5. Deploy
+1. `git fetch origin <BRANCH>` and show you a **summary** of the new commits, files changed, and config to deploy.
+2. Ask for confirmation.
+3. `git pull --rebase --autostash`.
+4. Generate `APP_KEY` if missing, persist host `USER_ID`/`GROUP_ID` into `.env`.
+5. `chmod`/`chown` storage + db data dirs.
+6. `docker compose build && up -d` the containers.
+7. Wait for MariaDB to be healthy.
+8. Run `artisan migrate --force`, `storage:link`, `config/route/view/event:cache`.
+9. `octane:reload` if `SERVER=octane`.
+
+Output preview:
+
+```
+🐳 Deployment
+⚙️ Configuration
+  App           My App
+  Environment   production
+  Server        octane
+  Branch        main
+  Domain        app.example.com
+  ...
+
+📦 Changes
+  From    a1b2c3d
+  To      e4f5g6h
+  Commits 4
+
+  e4f5g6h  Fix billing edge case (Alice)
+  9876543  Add admin dashboard (Bob)
+  ...
+
+Proceed with deployment? [y/N]
+```
+
+### 5. Re-deploy (after every code push)
+
+Identical command:
 
 ```bash
-./dock deploy ~/myapp.prod.env
+./dock deploy
 ```
 
-What it does, in order:
+It's fully idempotent. If there are no new commits, it'll tell you and you can choose to abort or continue (useful to force a rebuild + re-migrate without a code change).
 
-1. Validates the env file (refuses unsafe `DEPLOY_DIR` like `/`, `/root`, `/etc`).
-2. Creates `DEPLOY_DIR`, `STORAGE_MOUNT_PATH`, `DB_MOUNT_PATH` if missing.
-3. `git clone` the repo to a temp dir.
-4. `rsync` into `DEPLOY_DIR`, **excluding** `.env`, `storage/`, `db-data/`.
-5. Copies your `production.env` to `${DEPLOY_DIR}/.env` (mode `600`).
-6. Generates `APP_KEY` if empty (preserves existing key across re-deploys).
-7. Auto-detects host `USER_ID`/`GROUP_ID` and persists them in `.env`.
-8. Sets exec bits on `dock` + `scripts/*.sh`.
-9. `chown` storage + db dirs to the container user.
-10. `docker compose build --build` and `up -d`.
-11. Waits for MariaDB healthcheck.
-12. Runs `php artisan migrate --force`, `storage:link`, `config/route/view:cache`.
-13. `octane:reload` if `SERVER=octane`.
+### Flags
 
-### 6. Re-deploy (after a code push)
+| Flag | Effect |
+|---|---|
+| `-y`, `--yes` | Skip the confirmation prompt (for CI/cron) |
+| `--skip-pull` | Don't run `git fetch`/`pull` — deploy whatever is in the working tree |
+| `-v`, `--verbose` | Stream `docker compose` output instead of hiding it |
 
-Same command — it's idempotent:
+### HTTPS
 
-```bash
-./dock deploy ~/myapp.prod.env
-```
+Use `SERVER=caddy` + `DOMAIN=app.example.com`. Caddy fetches a Let's Encrypt cert automatically on first request. Make sure:
+- DNS for `DOMAIN` resolves to the server's IP.
+- Ports 80 + 443 are open on the firewall.
+- No other webserver is bound to those ports.
 
-A backup of the previous `.env` is saved as `.env.bak.<timestamp>` automatically.
-
-### 7. HTTPS (recommended)
-
-Use `SERVER=caddy` + `DOMAIN=app.example.com`. Caddy will request a Let's Encrypt cert automatically on first request to that domain. Make sure port 80 and 443 are open on the server firewall and DNS for `DOMAIN` points to the server's IP.
-
-### Troubleshooting deploy
+### Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `Cannot connect to the Docker daemon` | `sudo usermod -aG docker $USER && newgrp docker` |
-| `Permission denied` on `storage/` | Re-run deploy as a user that can `chown`, or `sudo` it |
-| `git clone` fails on private repo | Add server's SSH key as deploy key (step 1) |
-| Port 80/443 in use | Stop host webserver (`sudo systemctl stop nginx`) or set `HTTP_PORT`/`HTTPS_PORT` in env |
-| App reachable but DB connection refused | Wait — first start migrates DB; check `./dock logs mariadb` |
-| Changed `.env` not taking effect | `.env` is mounted read-only into the container. Run `./dock restart` (no rebuild needed for env-only changes) |
+| `Permission denied` on `storage/` | Re-run with `sudo` or set storage dir owner to your UID |
+| `git fetch` fails on private repo | Add the server's SSH key as a deploy key (step 1) |
+| Port 80/443 already in use | Stop host webserver (`sudo systemctl stop nginx`) or set `HTTP_PORT`/`HTTPS_PORT` in `.env` |
+| `.env` change not taking effect | `.env` is mounted read-only into the container. Run `./dock restart` (no rebuild needed for env-only changes) |
+| Want to abort after seeing the diff | Just answer `N` to the prompt — nothing has been pulled yet |
 
 ---
 
@@ -242,10 +256,12 @@ These are known gaps tracked for future work (not blocking the current deploy):
 
 ### Operational
 - **`./dock bootstrap`** subcommand: install Docker + create system user + open firewall ports + systemd unit so the app survives reboots.
-- **`./dock backup` / `./dock restore`**: one-shot DB + storage tarball.
+- **`./dock backup` / `./dock restore`**: one-shot DB + storage tarball. Should ideally be runnable as a `--backup` flag of `deploy` to auto-snapshot before each deploy.
+- **`./dock deploy --tag <tag>`**: deploy a specific git tag/sha (currently always pulls the configured `BRANCH`).
 - **systemd integration**: auto-start on boot via a generated `dock-${CONTAINER_NAME}.service`.
 - **Webhook notifications** on deploy success/failure (Slack/Telegram/Discord).
-- **`--dry-run`** flag for `deploy`.
+- **`--dry-run`** flag for `deploy` (show the plan without pulling/building).
+- **Optional pre/post hooks**: `scripts/deploy/before.sh`, `scripts/deploy/after.sh` so apps can plug in extra steps (e.g. flush CDN, warm cache).
 
 ### Build / runtime
 - **Pin `mariadb:latest`** to a major version (e.g. `mariadb:11.4`).

@@ -96,7 +96,7 @@ show_help() {
     echo -e "    ${CYAN}fresh${NC}                Fresh migrate with seed"
     echo -e "    ${CYAN}seed${NC}                 Run database seeders"
     echo ""
-    echo -e "    ${YELLOW}deploy${NC} <env-file>   Deploy to production server"
+    echo -e "    ${YELLOW}deploy${NC}              Deploy / re-deploy (git pull + build + migrate)"
     echo -e "    ${YELLOW}install${NC}             Install dockerized-laravel in a project"
     echo ""
     echo -e "    ${DIM}help${NC}                Show this help message"
@@ -184,20 +184,32 @@ show_command_help() {
             ;;
         deploy)
             echo ""
-            echo -e "${BOLD}dock deploy${NC} - Deploy to production"
+            echo -e "${BOLD}dock deploy${NC} - Deploy / re-deploy this checkout"
             echo ""
             echo -e "${BOLD}USAGE${NC}"
-            echo "    ./dock deploy <env-file>"
+            echo "    ./dock deploy [options]"
             echo ""
-            echo -e "${BOLD}ARGUMENTS${NC}"
-            echo "    env-file    Path to the production .env file"
+            echo -e "${BOLD}OPTIONS${NC}"
+            echo "    -y, --yes        Skip the confirmation prompt"
+            echo "    --skip-pull      Don't fetch/pull from origin (use current checkout as-is)"
             echo ""
             echo -e "${BOLD}DESCRIPTION${NC}"
-            echo "    Deploys the application to a production server."
-            echo "    Requires REPO_URL, BRANCH, and DEPLOY_DIR in the env file."
+            echo "    Runs from inside a cloned repo with a populated .env. The script will:"
+            echo "      1. git fetch origin and show the commits being deployed"
+            echo "      2. ask for confirmation"
+            echo "      3. git pull (rebase + autostash)"
+            echo "      4. generate APP_KEY if missing, persist USER_ID/GROUP_ID"
+            echo "      5. build + start containers"
+            echo "      6. run migrations and rebuild caches"
             echo ""
-            echo -e "${BOLD}EXAMPLE${NC}"
-            echo "    ./dock deploy /path/to/production.env"
+            echo -e "${BOLD}FIRST-TIME SETUP${NC}"
+            echo "    1. ssh into the server"
+            echo "    2. git clone <your-app-repo> /var/www/myapp && cd /var/www/myapp"
+            echo "    3. copy/edit .env (set APP_ENV=production, CONTAINER_NAME, DB_*, DOMAIN)"
+            echo "    4. ./dock deploy"
+            echo ""
+            echo -e "${BOLD}RE-DEPLOY${NC}"
+            echo "    cd /var/www/myapp && ./dock deploy"
             echo ""
             ;;
         *)
@@ -490,153 +502,174 @@ cmd_seed() {
 # Command: deploy
 # -----------------------------------------------------------------------------
 cmd_deploy() {
-    local env_file="$1"
+    local skip_confirm=false
+    local skip_pull=false
 
-    if [[ -z "$env_file" ]]; then
-        print_error "Missing argument: path to production .env file"
-        show_command_help deploy
-        return 1
-    fi
-
-    if [[ ! -f "$env_file" ]]; then
-        print_error "Environment file not found: ${env_file}"
-        return 1
-    fi
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -y|--yes)     skip_confirm=true; shift ;;
+            --skip-pull)  skip_pull=true; shift ;;
+            -h|--help)    show_command_help deploy; return 0 ;;
+            *)            shift ;;
+        esac
+    done
 
     print_header "Deployment"
 
-    # Load production env
-    load_env "$env_file" || return 1
+    # Must run from inside a cloned repo with a .env present
+    if [[ ! -d "${PROJECT_ROOT}/.git" ]]; then
+        print_error "Not a git repository: ${PROJECT_ROOT}"
+        print_info "First-time setup: clone your app repo to the server, then run this from inside it."
+        return 1
+    fi
+    if [[ ! -f "${PROJECT_ROOT}/.env" ]]; then
+        print_error ".env not found in ${PROJECT_ROOT}"
+        print_info "Copy your production .env into this directory before deploying."
+        return 1
+    fi
+
+    load_env "${PROJECT_ROOT}/.env" || return 1
     validate_full_env "deploy" || return 1
 
-    # Safety: refuse dangerous deploy paths
-    case "${DEPLOY_DIR}" in
-        ""|"/"|"/root"|"/home"|"/etc"|"/usr"|"/var"|"/bin"|"/sbin"|"/boot"|"/dev"|"/proc"|"/sys")
-            print_error "DEPLOY_DIR refuses unsafe path: '${DEPLOY_DIR}'"
-            print_info "Use a dedicated app dir, e.g. /var/www/myapp or /opt/myapp"
+    cd "$PROJECT_ROOT" || return 1
+
+    if [[ "${APP_ENV:-local}" == "local" ]]; then
+        print_warning "APP_ENV=local — deploy is intended for staging/production."
+        confirm "Continue anyway?" || return 1
+    fi
+
+    # Refuse running deploy from paths we shouldn't touch
+    case "${PROJECT_ROOT}" in
+        "/"|"/root"|"/etc"|"/usr"|"/var"|"/bin"|"/sbin"|"/boot")
+            print_error "Refusing to deploy from unsafe path: '${PROJECT_ROOT}'"
             return 1
             ;;
     esac
 
-    if [[ -z "${REPO_URL:-}" ]]; then
-        print_error "REPO_URL not set in env file"
-        return 1
+    # ---- Fetch + summary ----------------------------------------------------
+    local branch="${BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
+    local current_sha new_sha
+    current_sha=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+    if [[ "$skip_pull" != "true" ]]; then
+        print_info "Fetching origin..."
+        if ! git fetch --tags origin "$branch" 2>&1 | grep -v "^$" >&2; then
+            print_error "git fetch failed (check SSH key / token for the repo)"
+            return 1
+        fi
+        new_sha=$(git rev-parse --short "origin/${branch}" 2>/dev/null || echo "$current_sha")
+    else
+        new_sha="$current_sha"
+    fi
+
+    if [[ -n "$(git status --porcelain 2>/dev/null | grep -v '^?? ')" ]]; then
+        print_warning "Uncommitted local changes detected. Pull will use --autostash."
     fi
 
     print_section "${ICON_GEAR} Configuration"
-    print_kv "Repository" "${REPO_URL}"
-    print_kv "Branch" "${BRANCH:-main}"
-    print_kv "Deploy Dir" "${DEPLOY_DIR}"
-    print_kv "Storage Path" "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}"
-    print_kv "DB Path" "${DB_MOUNT_PATH:-${DEPLOY_DIR}/db-data}"
+    print_kv "App"          "${APP_NAME:-${CONTAINER_NAME}}"
+    print_kv "Environment"  "${APP_ENV}"
+    print_kv "Server"       "${SERVER:-octane}"
+    print_kv "Branch"       "${branch}"
+    print_kv "Domain"       "${DOMAIN:-localhost}"
+    print_kv "Deploy path"  "${PROJECT_ROOT}"
+    print_kv "Storage path" "${STORAGE_MOUNT_PATH:-${PROJECT_ROOT}/storage}"
+    print_kv "DB data path" "${DB_MOUNT_PATH:-${PROJECT_ROOT}/db-data}"
 
-    confirm "Proceed with deployment?" || return 1
+    print_section "${ICON_PACKAGE} Changes"
+    if [[ "$current_sha" == "$new_sha" ]]; then
+        print_info "Already at ${current_sha} — no new commits."
+        print_info "(re-deploy will still rebuild image and rerun migrations)"
+    else
+        print_kv "From" "$current_sha"
+        print_kv "To"   "$new_sha"
+        local commit_count
+        commit_count=$(git rev-list --count "${current_sha}..${new_sha}" 2>/dev/null || echo "?")
+        print_kv "Commits" "${commit_count}"
+        echo ""
+        git log --no-merges --pretty="  ${YELLOW}%h${NC} %s ${DIM}(%an)${NC}" \
+            "${current_sha}..${new_sha}" 2>/dev/null | head -15 || true
+        if [[ "$commit_count" =~ ^[0-9]+$ ]] && (( commit_count > 15 )); then
+            echo -e "  ${DIM}... and $((commit_count - 15)) more${NC}"
+        fi
+        echo ""
+        local file_count
+        file_count=$(git diff --name-only "${current_sha}..${new_sha}" 2>/dev/null | wc -l | tr -d ' ')
+        print_kv "Files changed" "${file_count}"
+    fi
 
     print_nl
+    if [[ "$skip_confirm" != "true" ]]; then
+        confirm "Proceed with deployment?" || return 1
+    fi
+
+    # ---- Pull ---------------------------------------------------------------
     print_section "${ICON_PACKAGE} Deploying"
 
-    # Ensure deploy dir + mount paths exist with correct ownership
+    if [[ "$skip_pull" != "true" && "$current_sha" != "$new_sha" ]]; then
+        print_info "Pulling ${branch}..."
+        git pull --rebase --autostash origin "$branch" 2>&1 | grep -v "^$" || true
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            print_error "git pull failed - resolve conflicts and re-run"
+            return 1
+        fi
+        print_success "Pulled to $(git rev-parse --short HEAD)"
+    fi
+
+    # ---- Ensure mount paths + UID/GID ---------------------------------------
     local host_uid="${USER_ID:-$(id -u)}"
     local host_gid="${GROUP_ID:-$(id -g)}"
+    local storage_path="${STORAGE_MOUNT_PATH:-${PROJECT_ROOT}/storage}"
+    local db_path="${DB_MOUNT_PATH:-${PROJECT_ROOT}/db-data}"
 
-    mkdir -p "${DEPLOY_DIR}" || { print_error "Cannot create ${DEPLOY_DIR}"; return 1; }
-    mkdir -p "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}"
-    mkdir -p "${DB_MOUNT_PATH:-${DEPLOY_DIR}/db-data}"
+    mkdir -p "$storage_path" "$db_path"
 
-    # Clone to temp dir
-    local tmp_base="/tmp"
-    if [[ -d "${PROJECT_ROOT}/.tmp" ]] || mkdir -p "${PROJECT_ROOT}/.tmp" 2>/dev/null; then
-        tmp_base="${PROJECT_ROOT}/.tmp"
+    if ! grep -qE '^USER_ID=' "${PROJECT_ROOT}/.env"; then
+        echo "USER_ID=${host_uid}" >> "${PROJECT_ROOT}/.env"
+    fi
+    if ! grep -qE '^GROUP_ID=' "${PROJECT_ROOT}/.env"; then
+        echo "GROUP_ID=${host_gid}" >> "${PROJECT_ROOT}/.env"
     fi
 
-    local tmp_dir
-    tmp_dir=$(mktemp -d "${tmp_base}/dock-deploy.XXXXXX")
-    register_cleanup "rm -rf $tmp_dir"
-
-    print_info "Cloning repository..."
-    git clone --depth 1 -b "${BRANCH:-main}" "${REPO_URL}" "$tmp_dir" 2>&1 | grep -v "^$" || true
-    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-        print_error "Failed to clone repository (check REPO_URL, BRANCH, and SSH/token access)"
-        return 1
-    fi
-    print_success "Repository cloned"
-
-    # Sync files - preserve exec bits, exclude runtime/secret paths
-    print_info "Syncing files..."
-    rsync -a --delete \
-        --exclude='.env' \
-        --exclude='.env.bak' \
-        --exclude='storage/' \
-        --exclude='db-data/' \
-        --exclude='.tmp/' \
-        --exclude='node_modules/' \
-        "${tmp_dir}/" "${DEPLOY_DIR}/" 2>&1 | tail -5
-    print_success "Files synced"
-
-    # Handle .env: preserve existing APP_KEY across re-deploys
-    local existing_key=""
-    if [[ -f "${DEPLOY_DIR}/.env" ]]; then
-        existing_key=$(grep -E '^APP_KEY=' "${DEPLOY_DIR}/.env" | head -n1 | cut -d= -f2- | tr -d '"' || true)
-        cp "${DEPLOY_DIR}/.env" "${DEPLOY_DIR}/.env.bak.$(date +%Y%m%d%H%M%S)"
-    fi
-    cp "$env_file" "${DEPLOY_DIR}/.env"
-
-    # Generate APP_KEY if missing (on host, before container start)
-    local new_key
-    new_key=$(grep -E '^APP_KEY=' "${DEPLOY_DIR}/.env" | head -n1 | cut -d= -f2- | tr -d '"' || true)
-    if [[ -z "$new_key" || "$new_key" == "base64:" ]]; then
-        if [[ -n "$existing_key" && "$existing_key" != "base64:" ]]; then
-            print_info "Preserving existing APP_KEY"
-            new_key="$existing_key"
-        else
-            print_info "Generating new APP_KEY..."
-            new_key="base64:$(openssl rand -base64 32)"
-        fi
-        # Replace APP_KEY line in deployed .env
-        if grep -qE '^APP_KEY=' "${DEPLOY_DIR}/.env"; then
+    # ---- APP_KEY ------------------------------------------------------------
+    local current_key
+    current_key=$(grep -E '^APP_KEY=' "${PROJECT_ROOT}/.env" | head -n1 | cut -d= -f2- | tr -d '"' || true)
+    if [[ -z "$current_key" || "$current_key" == "base64:" ]]; then
+        print_info "Generating APP_KEY..."
+        local new_key="base64:$(openssl rand -base64 32)"
+        if grep -qE '^APP_KEY=' "${PROJECT_ROOT}/.env"; then
             if [[ "$(uname)" == "Darwin" ]]; then
-                sed -i '' "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${DEPLOY_DIR}/.env"
+                sed -i '' "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${PROJECT_ROOT}/.env"
             else
-                sed -i "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${DEPLOY_DIR}/.env"
+                sed -i "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${PROJECT_ROOT}/.env"
             fi
         else
-            echo "APP_KEY=${new_key}" >> "${DEPLOY_DIR}/.env"
+            echo "APP_KEY=${new_key}" >> "${PROJECT_ROOT}/.env"
         fi
         print_success "APP_KEY set"
     fi
 
-    # Persist host UID/GID into .env so rebuild uses correct user
-    if ! grep -qE '^USER_ID=' "${DEPLOY_DIR}/.env"; then
-        echo "USER_ID=${host_uid}" >> "${DEPLOY_DIR}/.env"
+    # ---- Perms --------------------------------------------------------------
+    chmod +x "${PROJECT_ROOT}/dock" 2>/dev/null || true
+    find "${PROJECT_ROOT}/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
+    chmod 600 "${PROJECT_ROOT}/.env"
+
+    if chown -R "${host_uid}:${host_gid}" "$storage_path" "$db_path" 2>/dev/null; then
+        chmod -R 775 "$storage_path" 2>/dev/null || true
+    else
+        print_warning "chown of storage/db-data skipped (run with sudo for clean perms)"
     fi
-    if ! grep -qE '^GROUP_ID=' "${DEPLOY_DIR}/.env"; then
-        echo "GROUP_ID=${host_gid}" >> "${DEPLOY_DIR}/.env"
-    fi
 
-    # Set perms: scripts executable, storage writable, nothing else touched
-    chmod +x "${DEPLOY_DIR}/dock" 2>/dev/null || true
-    find "${DEPLOY_DIR}/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
-    chmod 600 "${DEPLOY_DIR}/.env"
-
-    # Storage + db-data owned by container user (host UID/GID)
-    chown -R "${host_uid}:${host_gid}" \
-        "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}" \
-        "${DB_MOUNT_PATH:-${DEPLOY_DIR}/db-data}" 2>/dev/null || \
-        print_warning "chown skipped (run as root for proper storage permissions)"
-    chmod -R 775 "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}" 2>/dev/null || true
-
-    cd "${DEPLOY_DIR}" || return 1
-
-    # Build + start
+    # ---- Build + start ------------------------------------------------------
     local dock_args=("--build")
     [[ "$VERBOSE" == "true" ]] && dock_args+=("--verbose")
     [[ "$QUIET" == "true" ]] && dock_args+=("--quiet")
     [[ "$DEBUG" == "true" ]] && dock_args+=("--debug")
 
     print_info "Building and starting containers..."
-    ./dock start "${dock_args[@]}" || { print_error "Container start failed"; return 1; }
+    "${PROJECT_ROOT}/dock" start "${dock_args[@]}" || { print_error "Container start failed"; return 1; }
 
-    # Post-deploy: migrations + caches
+    # ---- Post-deploy --------------------------------------------------------
     print_section "${ICON_GEAR} Post-deploy"
 
     print_info "Waiting for database..."
@@ -664,7 +697,6 @@ cmd_deploy() {
     docker exec "${CONTAINER_NAME}" php artisan view:cache 2>/dev/null || true
     docker exec "${CONTAINER_NAME}" php artisan event:cache 2>/dev/null || true
 
-    # Reload octane if running
     if [[ "${SERVER:-artisan}" == "octane" ]]; then
         docker exec "${CONTAINER_NAME}" php artisan octane:reload 2>/dev/null || true
     fi

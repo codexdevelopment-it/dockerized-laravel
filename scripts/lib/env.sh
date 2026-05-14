@@ -77,7 +77,8 @@ get_project_root() {
 
 # Required environment variables for different operations
 readonly REQUIRED_VARS_START="CONTAINER_NAME APP_ENV SERVER"
-readonly REQUIRED_VARS_DEPLOY="REPO_URL BRANCH DEPLOY_DIR"
+# Deploy runs from a cloned repo; REPO_URL/BRANCH/DEPLOY_DIR are no longer needed.
+readonly REQUIRED_VARS_DEPLOY="DB_DATABASE DB_USERNAME DB_PASSWORD"
 
 # Validate that required environment variables are set
 # Usage: validate_env <operation>
@@ -85,7 +86,7 @@ validate_env() {
     local operation="${1:-start}"
     local required_vars
     local missing_vars=()
-    
+
     case "$operation" in
         start)  required_vars=$REQUIRED_VARS_START ;;
         deploy) required_vars="$REQUIRED_VARS_START $REQUIRED_VARS_DEPLOY" ;;
