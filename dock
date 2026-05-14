@@ -26,7 +26,9 @@
 #
 # =============================================================================
 
-set -e
+# NOTE: no `set -e`. We use explicit `|| return 1` / `|| true` where it matters.
+# `set -e` interacted badly with function-call + AND-OR-list constructs and was
+# causing spurious "Container start failed" errors after a successful start.
 
 # Determine script location and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -323,31 +325,41 @@ setup_octane() {
     return 0
 }
 
-# Provision the application
+# Provision the application.
+# Runs `docker exec` steps that may legitimately fail (missing artisan, perms);
+# always returns 0 so callers don't blow up. In verbose mode, errors print.
 provision_app() {
     print_verbose "Provisioning application..."
-    
-    # Create directories
-    docker exec "${CONTAINER_NAME}" mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/app/public 2>/dev/null || true
-    
-    # Set permissions
-    docker exec "${CONTAINER_NAME}" chmod -R 775 storage bootstrap/cache public 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/ 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX public/ 2>/dev/null || true
-    
+
+    # Helper: run docker exec and report failures only in verbose mode
+    _provision_run() {
+        local label="$1"; shift
+        if [[ "${VERBOSE:-false}" == "true" ]]; then
+            docker exec "${CONTAINER_NAME}" "$@" || \
+                print_warning "  ${label} returned non-zero (continuing)"
+        else
+            docker exec "${CONTAINER_NAME}" "$@" >/dev/null 2>&1 || true
+        fi
+    }
+
+    # Storage scaffolding (in case the image was built without these dirs).
+    _provision_run "mkdir storage" sh -c 'mkdir -p storage/framework/{sessions,views,cache} storage/app/public storage/logs bootstrap/cache'
+    _provision_run "chmod storage" sh -c 'chmod -R 775 storage bootstrap/cache 2>/dev/null'
+    _provision_run "chown storage" sh -c 'chown -R laravel:www-data storage bootstrap/cache 2>/dev/null'
+    _provision_run "setfacl storage" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/
+    _provision_run "setfacl public" setfacl -R -d -m u::rwX,g::rwX,o::rX public/
+
     # Generate key only in local (.env is writable). Prod handles this in deploy.
     if is_local_env && [[ -z "${APP_KEY:-}" ]]; then
         print_verbose "Generating application key..."
-        docker exec "${CONTAINER_NAME}" php artisan key:generate 2>/dev/null || true
+        _provision_run "key:generate" php artisan key:generate
     fi
 
-    # Storage link
-    docker exec "${CONTAINER_NAME}" php artisan storage:link --force 2>/dev/null || true
+    _provision_run "storage:link" php artisan storage:link --force
 
-    # Clear caches in local env
     if is_local_env; then
         print_verbose "Clearing caches for local development..."
-        docker exec "${CONTAINER_NAME}" php artisan optimize:clear 2>/dev/null || true
+        _provision_run "optimize:clear" php artisan optimize:clear
     fi
 
     return 0
@@ -686,7 +698,9 @@ cmd_deploy() {
     if chown -R "${host_uid}:${host_gid}" "$storage_path" "$db_path" 2>/dev/null; then
         chmod -R 775 "$storage_path" 2>/dev/null || true
     else
-        print_warning "chown of storage/db-data skipped (run with sudo for clean perms)"
+        print_warning "chown of storage/db-data skipped (paths owned by another user)."
+        print_info "    If the app fails with 'Permission denied' on storage, run once:"
+        print_info "    sudo chown -R ${host_uid}:${host_gid} ${storage_path} ${db_path}"
     fi
 
     # ---- Build + start ------------------------------------------------------
