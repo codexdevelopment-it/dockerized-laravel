@@ -22,12 +22,10 @@ services:
     environment:
       - APP_ENV=${APP_ENV:-local}
       - CONTAINER_NAME=${CONTAINER_NAME}
+      - TZ=${APP_TIMEZONE:-Europe/Rome}
     volumes:
       # FPM pool configuration
       - '../config/fpm/pool.conf:/usr/local/etc/php-fpm.d/zz-docker.conf:ro'
-      # Timezone sync (Linux only, ignored on macOS)
-      - '/etc/timezone:/etc/timezone:ro'
-      - '/etc/localtime:/etc/localtime:ro'
     networks:
       - app-network
     healthcheck:
