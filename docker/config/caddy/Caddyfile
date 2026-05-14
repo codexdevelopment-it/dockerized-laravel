@@ -4,7 +4,7 @@
 ; =============================================================================
 
 {$DOMAIN:localhost} {
-    root * /var/www/{$CONTAINER_NAME:app}/public
+    root * /var/www/html/public
     
     # Enable file server
     file_server

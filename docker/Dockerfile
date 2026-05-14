@@ -48,6 +48,8 @@ RUN rm -f auth.json
 FROM dunglas/frankenphp:1.11.2-php8.3 AS runtime
 
 ARG BUILD_ENV=local
+ARG USER_ID=1000
+ARG GROUP_ID=1000
 
 ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN chmod +x /usr/local/bin/install-php-extensions
@@ -63,7 +65,15 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 RUN install-php-extensions \
     pdo_pgsql pdo_mysql gd intl zip opcache redis pcntl bcmath exif calendar mbstring
 
-RUN useradd -u 1000 -g www-data -m laravel
+# Create laravel user matching host UID/GID to avoid storage permission issues
+RUN if getent group ${GROUP_ID} >/dev/null; then \
+        EXISTING_GROUP=$(getent group ${GROUP_ID} | cut -d: -f1); \
+        useradd -u ${USER_ID} -g ${EXISTING_GROUP} -m laravel; \
+    else \
+        groupadd -g ${GROUP_ID} laravel && \
+        useradd -u ${USER_ID} -g ${GROUP_ID} -m laravel; \
+    fi && \
+    usermod -aG www-data laravel
 
 WORKDIR /var/www/html
 

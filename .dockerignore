@@ -1,0 +1,55 @@
+# =============================================================================
+# Docker build context exclusions
+# Keep build context small + prevent host secrets/state from baking into image
+# =============================================================================
+
+# Secrets / config (mounted at runtime instead)
+.env
+.env.*
+!.env.example
+auth.json.local
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# IDE / OS
+.idea
+.vscode
+.DS_Store
+*.swp
+*.swo
+
+# Dependencies (rebuilt inside container)
+node_modules
+vendor
+
+# Build artifacts
+public/build
+public/hot
+public/storage
+storage/app/public/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/logs/*
+!storage/**/.gitkeep
+
+# Tests / docs
+tests
+phpunit.xml
+README*.md
+CHANGELOG*.md
+
+# Tooling / temp
+.tmp
+.phpunit.result.cache
+.phpunit.cache
+npm-debug.log
+yarn-error.log
+*.log
+
+# Docker meta (mounted at runtime, no need in image)
+docker/compose
+docker-compose*.yml

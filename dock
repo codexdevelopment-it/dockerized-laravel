@@ -318,15 +318,15 @@ provision_app() {
     docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/ 2>/dev/null || true
     docker exec "${CONTAINER_NAME}" setfacl -R -d -m u::rwX,g::rwX,o::rX public/ 2>/dev/null || true
     
-    # Generate key if needed
-    if [[ -z "${APP_KEY:-}" ]]; then
+    # Generate key only in local (.env is writable). Prod handles this in deploy.
+    if is_local_env && [[ -z "${APP_KEY:-}" ]]; then
         print_verbose "Generating application key..."
         docker exec "${CONTAINER_NAME}" php artisan key:generate 2>/dev/null || true
     fi
-    
+
     # Storage link
     docker exec "${CONTAINER_NAME}" php artisan storage:link --force 2>/dev/null || true
-    
+
     # Clear caches in local env
     if is_local_env; then
         print_verbose "Clearing caches for local development..."
@@ -491,68 +491,186 @@ cmd_seed() {
 # -----------------------------------------------------------------------------
 cmd_deploy() {
     local env_file="$1"
-    
+
     if [[ -z "$env_file" ]]; then
         print_error "Missing argument: path to production .env file"
         show_command_help deploy
         return 1
     fi
-    
+
     if [[ ! -f "$env_file" ]]; then
         print_error "Environment file not found: ${env_file}"
         return 1
     fi
-    
+
     print_header "Deployment"
-    
+
     # Load production env
     load_env "$env_file" || return 1
     validate_full_env "deploy" || return 1
-    
+
+    # Safety: refuse dangerous deploy paths
+    case "${DEPLOY_DIR}" in
+        ""|"/"|"/root"|"/home"|"/etc"|"/usr"|"/var"|"/bin"|"/sbin"|"/boot"|"/dev"|"/proc"|"/sys")
+            print_error "DEPLOY_DIR refuses unsafe path: '${DEPLOY_DIR}'"
+            print_info "Use a dedicated app dir, e.g. /var/www/myapp or /opt/myapp"
+            return 1
+            ;;
+    esac
+
+    if [[ -z "${REPO_URL:-}" ]]; then
+        print_error "REPO_URL not set in env file"
+        return 1
+    fi
+
     print_section "${ICON_GEAR} Configuration"
     print_kv "Repository" "${REPO_URL}"
     print_kv "Branch" "${BRANCH:-main}"
     print_kv "Deploy Dir" "${DEPLOY_DIR}"
-    
+    print_kv "Storage Path" "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}"
+    print_kv "DB Path" "${DB_MOUNT_PATH:-${DEPLOY_DIR}/db-data}"
+
     confirm "Proceed with deployment?" || return 1
-    
+
     print_nl
     print_section "${ICON_PACKAGE} Deploying"
-    
-    # Create temp directory
+
+    # Ensure deploy dir + mount paths exist with correct ownership
+    local host_uid="${USER_ID:-$(id -u)}"
+    local host_gid="${GROUP_ID:-$(id -g)}"
+
+    mkdir -p "${DEPLOY_DIR}" || { print_error "Cannot create ${DEPLOY_DIR}"; return 1; }
+    mkdir -p "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}"
+    mkdir -p "${DB_MOUNT_PATH:-${DEPLOY_DIR}/db-data}"
+
+    # Clone to temp dir
+    local tmp_base="/tmp"
+    if [[ -d "${PROJECT_ROOT}/.tmp" ]] || mkdir -p "${PROJECT_ROOT}/.tmp" 2>/dev/null; then
+        tmp_base="${PROJECT_ROOT}/.tmp"
+    fi
+
     local tmp_dir
-    tmp_dir=$(mktemp -d)
+    tmp_dir=$(mktemp -d "${tmp_base}/dock-deploy.XXXXXX")
     register_cleanup "rm -rf $tmp_dir"
-    
-    # Clone repository
+
     print_info "Cloning repository..."
-    if ! git clone --depth 1 -b "${BRANCH:-main}" "${REPO_URL}" "$tmp_dir" 2>&1 | grep -v "^$"; then
-        print_error "Failed to clone repository"
+    git clone --depth 1 -b "${BRANCH:-main}" "${REPO_URL}" "$tmp_dir" 2>&1 | grep -v "^$" || true
+    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+        print_error "Failed to clone repository (check REPO_URL, BRANCH, and SSH/token access)"
         return 1
     fi
     print_success "Repository cloned"
-    
-    # Sync files
+
+    # Sync files - preserve exec bits, exclude runtime/secret paths
     print_info "Syncing files..."
-    rsync -av --no-perms --no-owner --no-group --delete "${tmp_dir}/" "${DEPLOY_DIR}" 2>&1 | tail -5
+    rsync -a --delete \
+        --exclude='.env' \
+        --exclude='.env.bak' \
+        --exclude='storage/' \
+        --exclude='db-data/' \
+        --exclude='.tmp/' \
+        --exclude='node_modules/' \
+        "${tmp_dir}/" "${DEPLOY_DIR}/" 2>&1 | tail -5
     print_success "Files synced"
-    
-    # Backup and copy env
+
+    # Handle .env: preserve existing APP_KEY across re-deploys
+    local existing_key=""
     if [[ -f "${DEPLOY_DIR}/.env" ]]; then
-        mv "${DEPLOY_DIR}/.env" "${DEPLOY_DIR}/.env.bak"
+        existing_key=$(grep -E '^APP_KEY=' "${DEPLOY_DIR}/.env" | head -n1 | cut -d= -f2- | tr -d '"' || true)
+        cp "${DEPLOY_DIR}/.env" "${DEPLOY_DIR}/.env.bak.$(date +%Y%m%d%H%M%S)"
     fi
     cp "$env_file" "${DEPLOY_DIR}/.env"
-    
-    # Set permissions
-    chmod -R 770 "${DEPLOY_DIR}"
-    
-    # Change to deploy dir and start
+
+    # Generate APP_KEY if missing (on host, before container start)
+    local new_key
+    new_key=$(grep -E '^APP_KEY=' "${DEPLOY_DIR}/.env" | head -n1 | cut -d= -f2- | tr -d '"' || true)
+    if [[ -z "$new_key" || "$new_key" == "base64:" ]]; then
+        if [[ -n "$existing_key" && "$existing_key" != "base64:" ]]; then
+            print_info "Preserving existing APP_KEY"
+            new_key="$existing_key"
+        else
+            print_info "Generating new APP_KEY..."
+            new_key="base64:$(openssl rand -base64 32)"
+        fi
+        # Replace APP_KEY line in deployed .env
+        if grep -qE '^APP_KEY=' "${DEPLOY_DIR}/.env"; then
+            if [[ "$(uname)" == "Darwin" ]]; then
+                sed -i '' "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${DEPLOY_DIR}/.env"
+            else
+                sed -i "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${DEPLOY_DIR}/.env"
+            fi
+        else
+            echo "APP_KEY=${new_key}" >> "${DEPLOY_DIR}/.env"
+        fi
+        print_success "APP_KEY set"
+    fi
+
+    # Persist host UID/GID into .env so rebuild uses correct user
+    if ! grep -qE '^USER_ID=' "${DEPLOY_DIR}/.env"; then
+        echo "USER_ID=${host_uid}" >> "${DEPLOY_DIR}/.env"
+    fi
+    if ! grep -qE '^GROUP_ID=' "${DEPLOY_DIR}/.env"; then
+        echo "GROUP_ID=${host_gid}" >> "${DEPLOY_DIR}/.env"
+    fi
+
+    # Set perms: scripts executable, storage writable, nothing else touched
+    chmod +x "${DEPLOY_DIR}/dock" 2>/dev/null || true
+    find "${DEPLOY_DIR}/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
+    chmod 600 "${DEPLOY_DIR}/.env"
+
+    # Storage + db-data owned by container user (host UID/GID)
+    chown -R "${host_uid}:${host_gid}" \
+        "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}" \
+        "${DB_MOUNT_PATH:-${DEPLOY_DIR}/db-data}" 2>/dev/null || \
+        print_warning "chown skipped (run as root for proper storage permissions)"
+    chmod -R 775 "${STORAGE_MOUNT_PATH:-${DEPLOY_DIR}/storage}" 2>/dev/null || true
+
     cd "${DEPLOY_DIR}" || return 1
-    
-    print_info "Starting application..."
-    ./dock start
-    
+
+    # Build + start
+    local dock_args=("--build")
+    [[ "$VERBOSE" == "true" ]] && dock_args+=("--verbose")
+    [[ "$QUIET" == "true" ]] && dock_args+=("--quiet")
+    [[ "$DEBUG" == "true" ]] && dock_args+=("--debug")
+
+    print_info "Building and starting containers..."
+    ./dock start "${dock_args[@]}" || { print_error "Container start failed"; return 1; }
+
+    # Post-deploy: migrations + caches
+    print_section "${ICON_GEAR} Post-deploy"
+
+    print_info "Waiting for database..."
+    local waited=0
+    while ! docker exec "${CONTAINER_NAME}-mariadb" healthcheck.sh --connect &>/dev/null; do
+        waited=$((waited + 1))
+        if (( waited > 60 )); then
+            print_error "Database did not become ready in 60s"
+            return 1
+        fi
+        sleep 1
+    done
+    print_success "Database ready"
+
+    print_info "Running migrations..."
+    docker exec "${CONTAINER_NAME}" php artisan migrate --force || \
+        print_warning "Migration failed - check logs"
+
+    print_info "Storage link..."
+    docker exec "${CONTAINER_NAME}" php artisan storage:link 2>/dev/null || true
+
+    print_info "Rebuilding caches..."
+    docker exec "${CONTAINER_NAME}" php artisan config:cache 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" php artisan route:cache 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" php artisan view:cache 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" php artisan event:cache 2>/dev/null || true
+
+    # Reload octane if running
+    if [[ "${SERVER:-artisan}" == "octane" ]]; then
+        docker exec "${CONTAINER_NAME}" php artisan octane:reload 2>/dev/null || true
+    fi
+
     print_success "Deployment complete!"
+    print_ready "http://${DOMAIN:-localhost}:${APP_PORT:-8000}"
 }
 
 # -----------------------------------------------------------------------------

@@ -10,7 +10,9 @@ services:
   app:
     volumes:
       # Only mount storage directory (code is baked into image)
-      - '${STORAGE_MOUNT_PATH:-./storage}:/var/www/${CONTAINER_NAME}/storage'
+      - '${STORAGE_MOUNT_PATH:-./storage}:/var/www/html/storage'
+      # Mount .env so credentials can change without rebuild
+      - '../../.env:/var/www/html/.env:ro'
       # Environment-specific PHP configuration
       - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
       - '../config/php/production.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'

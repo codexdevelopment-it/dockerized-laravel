@@ -14,9 +14,11 @@ services:
       dockerfile: docker/Dockerfile
       args:
         - BUILD_ENV=${APP_ENV:-local}
+        - USER_ID=${USER_ID:-1000}
+        - GROUP_ID=${GROUP_ID:-1000}
     image: '${CONTAINER_NAME}:${APP_ENV:-local}'
     restart: '${RESTART_POLICY:-no}'
-    working_dir: '/var/www/${CONTAINER_NAME}'
+    working_dir: '/var/www/html'
     environment:
       - APP_ENV=${APP_ENV:-local}
       - CONTAINER_NAME=${CONTAINER_NAME}

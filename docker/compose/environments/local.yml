@@ -10,7 +10,7 @@ services:
   app:
     volumes:
       # Mount entire project for live reload
-      - '../../:/var/www/${CONTAINER_NAME}'
+      - '../../:/var/www/html'
       # Environment-specific PHP configuration
       - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
       - '../config/php/local.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'
