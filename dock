@@ -279,11 +279,11 @@ cmd_start() {
     # Print status (ignore errors - containers might not be labeled yet)
     print_container_status || true
     
-    # Handle server-specific setup. Octane is the actual app backend for
-    # octane/nginx/caddy modes (nginx & caddy just reverse-proxy to it).
-    case "${SERVER:-artisan}" in
-        octane|nginx|caddy) setup_octane || true ;;
-    esac
+    # Octane setup only when actually using Octane.
+    # nginx/caddy talk FastCGI to php-fpm on app:9000 - no octane needed.
+    if [[ "${SERVER:-artisan}" == "octane" ]]; then
+        setup_octane || true
+    fi
     
     # Standard provisioning
     provision_app || true

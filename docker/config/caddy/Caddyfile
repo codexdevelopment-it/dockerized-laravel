@@ -1,33 +1,15 @@
 # =============================================================================
-# Caddy Reverse Proxy for Laravel + FrankenPHP/Octane
-# Automatic HTTPS + reverse proxy to the app container (Octane HTTP on :8000).
+# Caddy + PHP-FPM
+# Automatic HTTPS (Let's Encrypt) when DOMAIN is a real public domain.
 # =============================================================================
 
 {$DOMAIN:localhost} {
-    # Serve static files directly when present
     root * /var/www/html/public
     encode gzip zstd
 
-    @static {
-        file
-        path *.css *.js *.gif *.ico *.jpeg *.jpg *.png *.svg *.woff *.woff2 *.ttf *.eot
-    }
-    handle @static {
-        header Cache-Control "public, max-age=31536000, immutable"
-        file_server
-    }
+    php_fastcgi app:9000
 
-    # Everything else → octane backend
-    reverse_proxy app:8000 {
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        transport http {
-            keepalive 30s
-            keepalive_idle_conns 32
-        }
-    }
+    file_server
 
     header {
         X-Frame-Options "SAMEORIGIN"

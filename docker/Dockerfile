@@ -1,12 +1,16 @@
 # =============================================================================
 # Dockerized Laravel - Multi-Environment Dockerfile
-# Supports: local, staging, production
+# Base: php:8.3-fpm (provides both php-fpm and php-cli SAPIs)
+# Octane (FrankenPHP) is optional - the static binary is added for users who
+# pick SERVER=octane. Users on SERVER=nginx/caddy/fpm don't need it.
 # =============================================================================
+
+ARG FRANKENPHP_VERSION=1.11.2
 
 # -----------------------------------------------------------------------------
 # Stage 1: Builder
 # -----------------------------------------------------------------------------
-FROM dunglas/frankenphp:1.11.2-php8.3 AS builder
+FROM php:8.3-fpm-bookworm AS builder
 
 ARG BUILD_ENV=local
 
@@ -26,30 +30,28 @@ WORKDIR /var/www/html
 # Copy dependency files AND auth.json (if it exists) BEFORE running composer
 COPY composer.json composer.lock package.json* package-lock.json* auth.json* ./
 
-# Install PHP dependencies (Now has access to Nova credentials)
 RUN if [ "$BUILD_ENV" = "production" ]; then \
         composer install --no-scripts --no-autoloader --prefer-dist --no-dev; \
     else \
         composer install --no-scripts --no-autoloader --prefer-dist; \
     fi
 
-# Copy remaining application files
 COPY . .
 
-# Dump autoloader
 RUN composer dump-autoload --optimize --no-scripts
 
-# Remove auth.json so it doesn't get copied to the runtime stage
 RUN rm -f auth.json
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime
 # -----------------------------------------------------------------------------
-FROM dunglas/frankenphp:1.11.2-php8.3 AS runtime
+FROM php:8.3-fpm-bookworm AS runtime
 
 ARG BUILD_ENV=local
 ARG USER_ID=1000
 ARG GROUP_ID=1000
+ARG FRANKENPHP_VERSION=1.11.2
+ARG TARGETARCH
 
 ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN chmod +x /usr/local/bin/install-php-extensions
@@ -57,7 +59,7 @@ RUN chmod +x /usr/local/bin/install-php-extensions
 ENV SERVER_NAME=":8000"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor curl acl nano procps git unzip \
+    supervisor curl acl nano procps git unzip ca-certificates netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -65,24 +67,33 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 RUN install-php-extensions \
     pdo_pgsql pdo_mysql gd intl zip opcache redis pcntl bcmath exif calendar mbstring
 
-# Create laravel user matching host UID/GID to avoid storage permission issues.
-# UID 0 is rejected on purpose - we never run app as root inside the container.
+# Install FrankenPHP static binary - only needed when SERVER=octane.
+# Harmless dead weight (~30MB) otherwise. Detected arch fallback to amd64.
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+        amd64) FP_ARCH=x86_64 ;; \
+        arm64) FP_ARCH=aarch64 ;; \
+        *)     FP_ARCH=x86_64 ;; \
+    esac && \
+    curl -fsSL -o /usr/local/bin/frankenphp \
+        "https://github.com/dunglas/frankenphp/releases/download/v${FRANKENPHP_VERSION}/frankenphp-linux-${FP_ARCH}" && \
+    chmod +x /usr/local/bin/frankenphp
+
+# Create laravel user matching host UID/GID. UID 0 forbidden (no app-as-root).
 RUN if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
         echo "ERROR: USER_ID/GROUP_ID must not be 0 (refusing to run as root)" >&2; \
         exit 1; \
     fi && \
-    # If GID already exists, reuse its group name; otherwise create one.
     if getent group ${GROUP_ID} >/dev/null; then \
         EXISTING_GROUP=$(getent group ${GROUP_ID} | cut -d: -f1); \
     else \
         groupadd -g ${GROUP_ID} laravel; \
         EXISTING_GROUP=laravel; \
     fi && \
-    # If UID already exists, rename that user to laravel; otherwise create one.
     if getent passwd ${USER_ID} >/dev/null; then \
         EXISTING_USER=$(getent passwd ${USER_ID} | cut -d: -f1); \
         if [ "$EXISTING_USER" != "laravel" ]; then \
-            usermod -l laravel -d /home/laravel -m "$EXISTING_USER" || true; \
+            usermod -l laravel -d /home/laravel -m "$EXISTING_USER" 2>/dev/null || true; \
             groupmod -n laravel "$EXISTING_USER" 2>/dev/null || true; \
         fi; \
     else \
@@ -92,10 +103,20 @@ RUN if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
 
 WORKDIR /var/www/html
 
+# Supervisor program drop-in dir (env compose + server compose mount here)
+RUN mkdir -p /etc/supervisor/programs
+
 # Copy application from builder stage
 COPY --from=builder --chown=laravel:www-data /var/www/html /var/www/html
 
+# Create runtime dirs (storage/bootstrap may not exist in slim apps or be
+# .dockerignored) and prelink frankenphp binary for octane:frankenphp.
 RUN mkdir -p /var/www/html/vendor/laravel/octane/bin \
+             /var/www/html/storage/framework/cache \
+             /var/www/html/storage/framework/sessions \
+             /var/www/html/storage/framework/views \
+             /var/www/html/storage/logs \
+             /var/www/html/bootstrap/cache \
     && ln -sf /usr/local/bin/frankenphp /var/www/html/vendor/laravel/octane/bin/frankenphp-linux-x86_64 \
     && ln -sf /usr/local/bin/frankenphp /var/www/html/vendor/laravel/octane/bin/frankenphp-linux-aarch64 \
     && chown -R laravel:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/vendor/laravel/octane/bin \
@@ -115,7 +136,8 @@ RUN if [ "$BUILD_ENV" = "production" ] || [ "$BUILD_ENV" = "staging" ]; then \
         echo "Skipping optimizations for ${BUILD_ENV} environment"; \
     fi
 
-EXPOSE 8000
+# php-fpm pool default port (overridden by mounted pool.conf)
+EXPOSE 8000 9000
 
 USER root
 

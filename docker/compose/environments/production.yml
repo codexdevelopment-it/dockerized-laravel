@@ -16,9 +16,10 @@ services:
       # Environment-specific PHP configuration
       - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
       - '../config/php/production.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'
-      # Environment-specific supervisor configuration
+      # Supervisor: base + per-env workers. Server program is mounted by the
+      # server compose file (servers/*.yml).
       - '../config/supervisor/base.conf:/etc/supervisor/conf.d/00-base.conf:ro'
-      - '../config/supervisor/production.conf:/etc/supervisor/conf.d/01-programs.conf:ro'
+      - '../config/supervisor/workers-production.conf:/etc/supervisor/programs/10-workers.conf:ro'
     deploy:
       resources:
         limits:

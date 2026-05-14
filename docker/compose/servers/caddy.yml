@@ -1,13 +1,13 @@
 # =============================================================================
-# Caddy Reverse Proxy
-# Automatic HTTPS via Let's Encrypt + reverse proxy to the app container
-# (FrankenPHP/Octane on port 8000). Set DOMAIN in .env to enable HTTPS.
+# Caddy + PHP-FPM
+# Caddy fronts php-fpm on app:9000 via php_fastcgi. Auto-HTTPS via DOMAIN env.
 # =============================================================================
 
 services:
-  # ---------------------------------------------------------------------------
-  # Caddy Web Server / Reverse Proxy
-  # ---------------------------------------------------------------------------
+  app:
+    volumes:
+      - '../config/supervisor/server-fpm.conf:/etc/supervisor/programs/20-server.conf:ro'
+
   caddy:
     container_name: '${CONTAINER_NAME}-caddy'
     image: caddy:alpine
@@ -15,10 +15,12 @@ services:
     ports:
       - '${HTTP_PORT:-80}:80'
       - '${HTTPS_PORT:-443}:443'
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
     volumes:
       - '../config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro'
-      - '../../:/var/www/html'
-      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/html/storage'
+      - '../../:/var/www/html:ro'
+      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/html/storage:ro'
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -26,9 +28,6 @@ services:
     networks:
       - app-network
 
-# =============================================================================
-# Volumes
-# =============================================================================
 volumes:
   caddy-data:
     driver: local

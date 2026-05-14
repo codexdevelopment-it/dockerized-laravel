@@ -1,10 +1,12 @@
 # =============================================================================
-# Laravel Octane Server (FrankenPHP)
-# High-performance application server
+# Laravel Octane (FrankenPHP)
+# Exposes app HTTP directly on APP_PORT. Requires laravel/octane in composer.json.
 # =============================================================================
 
 services:
   app:
     ports:
       - '${APP_PORT:-8000}:8000'
-    # Octane is managed by supervisord (configured via environment-specific files)
+    volumes:
+      # Per-env octane tuning. APP_ENV is interpolated from .env at compose-time.
+      - '../config/supervisor/server-octane-${APP_ENV:-local}.conf:/etc/supervisor/programs/20-server.conf:ro'

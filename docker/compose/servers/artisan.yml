@@ -1,11 +1,10 @@
 # =============================================================================
-# Artisan Serve Server
-# Simple development server using `php artisan serve`
+# Artisan Serve (dev only)
+# `php artisan serve` is started interactively by the dock CLI on `./dock start`.
+# Supervisor only runs the workers - no server program in this mode.
 # =============================================================================
 
 services:
   app:
     ports:
       - '${APP_PORT:-8000}:80'
-    # Note: artisan serve is started interactively by the dock CLI
-    # This compose file just exposes the port

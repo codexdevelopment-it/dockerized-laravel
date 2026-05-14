@@ -50,15 +50,15 @@ APP_PORT=8000             # Application port
 
 ### Server Types
 
-| Server | Use Case |
-|--------|----------|
-| `artisan` | Quick dev (`php artisan serve`) |
-| `octane` | App exposed directly (FrankenPHP HTTP on `APP_PORT`) — **recommended for simple setups** |
-| `nginx` | Nginx reverse proxy in front of octane (classic logging, static caching) |
-| `caddy` | Caddy reverse proxy in front of octane — automatic HTTPS via `DOMAIN` |
-| `fpm` | Deprecated alias for `octane`. The FrankenPHP base does not ship php-fpm. |
+| Server | App container runs | Front | HTTPS | Requires `laravel/octane` |
+|--------|--------------------|-------|-------|---------------------------|
+| `artisan` | `php artisan serve` (dev only) | — | no | no |
+| `octane` | FrankenPHP HTTP on `:8000` | — (direct) | no | **yes** |
+| `nginx` | `php-fpm` on `:9000` | `nginx:alpine` | no | no |
+| `caddy` | `php-fpm` on `:9000` | `caddy:alpine` | auto via `DOMAIN` | no |
+| `fpm` | `php-fpm` on `:9000` | — (bring your own) | no | no |
 
-**All three production-grade servers (`octane`, `nginx`, `caddy`) run the same app container** — FrankenPHP/Octane on port 8000. `nginx` and `caddy` are just reverse proxies on top. This means `laravel/octane` must be in your `composer.json` regardless of the server mode you pick.
+Base image is `php:8.3-fpm-bookworm` — it ships `php-fpm` and `php-cli`. The FrankenPHP binary is installed on top so `octane` mode also works. Pick whichever server fits the app (older Laravel apps that don't support Octane go with `nginx`/`caddy`/`fpm`).
 
 ### Available Services
 
