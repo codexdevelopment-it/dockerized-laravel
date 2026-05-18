@@ -695,13 +695,19 @@ cmd_deploy() {
     find "${PROJECT_ROOT}/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
     chmod 600 "${PROJECT_ROOT}/.env"
 
-    if chown -R "${host_uid}:${host_gid}" "$storage_path" "$db_path" 2>/dev/null; then
+    # Storage must be writable by the app container (laravel UID/GID).
+    # DB data dir is NOT touched - the mariadb image's entrypoint manages its
+    # own ownership (mysql user inside the container, usually UID 999).
+    if chown -R "${host_uid}:${host_gid}" "$storage_path" 2>/dev/null; then
         chmod -R 775 "$storage_path" 2>/dev/null || true
     else
-        print_warning "chown of storage/db-data skipped (paths owned by another user)."
+        print_warning "chown of storage skipped (owned by another user)."
         print_info "    If the app fails with 'Permission denied' on storage, run once:"
-        print_info "    sudo chown -R ${host_uid}:${host_gid} ${storage_path} ${db_path}"
+        print_info "    sudo chown -R ${host_uid}:${host_gid} ${storage_path}"
     fi
+
+    # Make sure db data dir exists but DON'T chown it - that's mariadb's job.
+    mkdir -p "$db_path" 2>/dev/null || true
 
     # ---- Build + start ------------------------------------------------------
     local dock_args=("--build")
@@ -732,7 +738,7 @@ cmd_deploy() {
         print_warning "Migration failed - check logs"
 
     print_info "Storage link..."
-    docker exec "${CONTAINER_NAME}" php artisan storage:link 2>/dev/null || true
+    docker exec "${CONTAINER_NAME}" php artisan storage:link --force 2>/dev/null || true
 
     print_info "Rebuilding caches..."
     docker exec "${CONTAINER_NAME}" php artisan config:cache 2>/dev/null || true
