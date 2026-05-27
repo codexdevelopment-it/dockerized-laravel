@@ -252,21 +252,11 @@ cmd_start() {
     # Start containers
     print_section "${ICON_PACKAGE} Starting Containers"
     
+    # Always stream docker output — builds can take minutes and a silent
+    # spinner looks frozen. -q suppresses dock's own chatter, not docker's.
     local exit_code=0
-    if [[ "${VERBOSE:-false}" == "true" ]]; then
-        # In verbose mode, show all output directly
-        print_info "Starting containers..."
-        docker_up "$build" || exit_code=$?
-    else
-        # In normal mode, show progress inline
-        echo -ne "  ${ICON_BULLET} Building and starting containers..."
-        docker_up "$build" > /dev/null 2>&1 || exit_code=$?
-        if [[ $exit_code -eq 0 ]]; then
-            echo -e " ${GREEN}${ICON_SUCCESS}${NC}"
-        else
-            echo -e " ${RED}${ICON_ERROR}${NC}"
-        fi
-    fi
+    print_info "Starting containers..."
+    docker_up "$build" || exit_code=$?
     
     if [[ $exit_code -ne 0 ]]; then
         print_error "Failed to start containers"
