@@ -300,7 +300,12 @@ install_dockerized_laravel() {
         
         # Copy dock CLI
         cp dockerized-laravel/dock "$CONTAINER_BASE_NAME/"
-        
+
+        # Ship .dockerignore. Without it, COPY . . in the builder stage
+        # overlays the host's vendor/ onto the freshly-installed one and
+        # ships stale dependencies (see docker/Dockerfile builder stage).
+        cp dockerized-laravel/.dockerignore "$CONTAINER_BASE_NAME/.dockerignore"
+
         # Move .env file
         rm -f "$CONTAINER_BASE_NAME/.env"
         mv dockerized-laravel/.env "$CONTAINER_BASE_NAME/.env"
@@ -314,7 +319,15 @@ install_dockerized_laravel() {
             mv "../.env" "../.env.backup"
             print_info "Backed up existing .env to .env.backup"
         fi
-        
+
+        # Same for .dockerignore — don't silently overwrite user's rules.
+        # Missing/incomplete .dockerignore is the stale-vendor footgun.
+        if [[ -f "../.dockerignore" ]]; then
+            mv "../.dockerignore" "../.dockerignore.backup"
+            print_info "Backed up existing .dockerignore to .dockerignore.backup"
+        fi
+        cp .dockerignore ../
+
         # Copy files to parent directory
         cp .env ../
         cp dock ../

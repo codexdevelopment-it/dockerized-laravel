@@ -38,7 +38,17 @@ RUN if [ "$BUILD_ENV" = "production" ]; then \
 
 COPY . .
 
-RUN composer dump-autoload --optimize --no-scripts
+# Defensive heal: if .dockerignore is missing on the host, `COPY . .` will
+# overlay the host's vendor/ on top of the freshly-installed one above and
+# ship whatever stale package versions happen to be on the developer's laptop.
+# Re-running composer install is idempotent when vendor matches composer.lock
+# (fast lockfile validate + autoload dump) and self-heals when vendor was
+# clobbered. --optimize-autoloader subsumes the previous dump-autoload step.
+RUN if [ "$BUILD_ENV" = "production" ]; then \
+        composer install --no-scripts --prefer-dist --no-dev --optimize-autoloader; \
+    else \
+        composer install --no-scripts --prefer-dist --optimize-autoloader; \
+    fi
 
 RUN rm -f auth.json
 
