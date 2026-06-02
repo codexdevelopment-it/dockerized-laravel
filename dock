@@ -332,6 +332,24 @@ provision_app() {
         fi
     }
 
+    # Guard: vendor/autoload.php must exist before any artisan command can run.
+    # In local, the project is volume-mounted so vendor/ may be absent on a fresh
+    # clone — install it automatically. In production/staging, a missing vendor/
+    # means the image was built incorrectly: fail loudly rather than silently.
+    if ! docker exec "${CONTAINER_NAME}" test -f vendor/autoload.php 2>/dev/null; then
+        if is_local_env; then
+            print_warning "vendor/autoload.php not found — running composer install..."
+            docker exec "${CONTAINER_NAME}" composer install --no-scripts --prefer-dist \
+                || { print_error "composer install failed — cannot provision"; return 1; }
+            print_success "composer install completed"
+        else
+            print_error "vendor/autoload.php not found in container."
+            print_error "The Docker image appears to be missing its Composer dependencies."
+            print_error "Rebuild the image with: docker build --no-cache ..."
+            return 1
+        fi
+    fi
+
     # Storage scaffolding (in case the image was built without these dirs).
     _provision_run "mkdir storage" sh -c 'mkdir -p storage/framework/{sessions,views,cache} storage/app/public storage/logs bootstrap/cache'
     _provision_run "chmod storage" sh -c 'chmod -R 775 storage bootstrap/cache 2>/dev/null'
