@@ -21,12 +21,3 @@ services:
       - '../config/supervisor/base.conf:/etc/supervisor/conf.d/00-base.conf:ro'
       - '../config/supervisor/workers-staging.conf:/etc/supervisor/programs/10-workers.conf:ro'
 
-  # ---------------------------------------------------------------------------
-  # Database - Staging Overrides
-  # ---------------------------------------------------------------------------
-  mariadb:
-    # Expose port for debugging if needed
-    ports:
-      - '${DB_PORT:-3306}:3306'
-    volumes:
-      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/mysql'

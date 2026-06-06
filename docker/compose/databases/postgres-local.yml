@@ -1,0 +1,9 @@
+# =============================================================================
+# PostgreSQL — local development overrides
+# Exposes DB port for desktop clients (TablePlus, DBeaver, etc.)
+# =============================================================================
+
+services:
+  postgres:
+    ports:
+      - '${DB_PORT:-5432}:5432'

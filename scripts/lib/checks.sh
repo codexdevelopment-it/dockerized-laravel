@@ -76,7 +76,13 @@ check_required_ports() {
     
     # Database port (only if local env and DB exposed)
     if is_local_env; then
-        check_port_available 3306 "Database port" || ((errors++))
+        local db_driver="${DB_DRIVER:-mariadb}"
+        local default_db_port
+        case "$db_driver" in
+            postgres|postgresql) default_db_port=5432 ;;
+            *) default_db_port=3306 ;;
+        esac
+        check_port_available "${DB_PORT:-$default_db_port}" "Database port" || ((errors++))
     fi
     
     # Check service ports

@@ -130,25 +130,41 @@ validate_app_env() {
 validate_server() {
     local server="${SERVER:-artisan}"
     local valid_servers="artisan octane fpm nginx caddy"
-    
+
     if [[ ! " $valid_servers " =~ " $server " ]]; then
         print_error "Invalid SERVER value: ${server}"
         print_info "Valid values: ${valid_servers}"
         return 1
     fi
-    
+
     return 0
+}
+
+# Validate DB_DRIVER value
+validate_db_driver() {
+    local driver="${DB_DRIVER:-mariadb}"
+    [[ "$driver" == "postgresql" ]] && driver="postgres"
+
+    case "$driver" in
+        mariadb|postgres) return 0 ;;
+        *)
+            print_error "Invalid DB_DRIVER value: ${driver}"
+            print_info "Valid values: mariadb, postgres"
+            return 1
+            ;;
+    esac
 }
 
 # Full environment validation
 validate_full_env() {
     local operation="${1:-start}"
     local errors=0
-    
+
     validate_env "$operation" || ((errors++))
     validate_app_env || ((errors++))
     validate_server || ((errors++))
-    
+    validate_db_driver || ((errors++))
+
     return $errors
 }
 
@@ -213,6 +229,7 @@ print_env_summary() {
     print_section "${ICON_GEAR} Configuration"
     print_kv "Environment" "${APP_ENV:-local}"
     print_kv "Server" "${SERVER:-artisan}"
+    print_kv "Database" "${DB_DRIVER:-mariadb}"
     print_kv "Container" "${CONTAINER_NAME:-unknown}"
     print_kv "Port" "${APP_PORT:-8000}"
     

@@ -36,7 +36,19 @@ RUN if [ "$BUILD_ENV" = "production" ]; then \
         composer install --no-scripts --no-autoloader --prefer-dist; \
     fi
 
+# Pre-install npm deps before copying source for better layer caching.
+# Skipped for local: the volume mount overlays public/build anyway.
+RUN if [ "$BUILD_ENV" != "local" ] && [ -f "package.json" ] && [ -f "package-lock.json" ]; then \
+        npm ci --no-audit --no-fund; \
+    fi
+
 COPY . .
+
+# Build frontend assets (production/staging only).
+# --if-present skips gracefully when no "build" script is defined in package.json.
+RUN if [ "$BUILD_ENV" != "local" ] && [ -f "package.json" ]; then \
+        npm run --if-present build; \
+    fi
 
 # Defensive heal: if .dockerignore is missing on the host, `COPY . .` will
 # overlay the host's vendor/ on top of the freshly-installed one above and

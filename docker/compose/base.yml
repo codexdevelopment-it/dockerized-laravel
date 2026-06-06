@@ -34,28 +34,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ---------------------------------------------------------------------------
-  # Database Container
-  # ---------------------------------------------------------------------------
-  mariadb:
-    container_name: '${CONTAINER_NAME}-mariadb'
-    image: 'mariadb:latest'
-    restart: '${RESTART_POLICY:-no}'
-    environment:
-      MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
-      MYSQL_ROOT_HOST: '%'
-      MYSQL_DATABASE: '${DB_DATABASE}'
-      MYSQL_USER: '${DB_USERNAME}'
-      MYSQL_PASSWORD: '${DB_PASSWORD}'
-      TZ: '${APP_TIMEZONE:-Europe/Rome}'
-    networks:
-      - app-network
-    healthcheck:
-      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
 # =============================================================================
 # Networks
 # =============================================================================

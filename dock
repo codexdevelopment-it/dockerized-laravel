@@ -730,8 +730,17 @@ cmd_deploy() {
     print_section "${ICON_GEAR} Post-deploy"
 
     print_info "Waiting for database..."
+    local db_driver="${DB_DRIVER:-mariadb}"
+    local db_container db_check=()
+    if [[ "$db_driver" == "postgres" || "$db_driver" == "postgresql" ]]; then
+        db_container="${CONTAINER_NAME}-postgres"
+        db_check=(pg_isready -U "${DB_USERNAME:-app}" -d "${DB_DATABASE:-app}")
+    else
+        db_container="${CONTAINER_NAME}-mariadb"
+        db_check=(healthcheck.sh --connect)
+    fi
     local waited=0
-    while ! docker exec "${CONTAINER_NAME}-mariadb" healthcheck.sh --connect &>/dev/null; do
+    while ! docker exec "${db_container}" "${db_check[@]}" &>/dev/null; do
         waited=$((waited + 1))
         if (( waited > 60 )); then
             print_error "Database did not become ready in 60s"

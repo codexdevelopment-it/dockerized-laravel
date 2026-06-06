@@ -1,0 +1,11 @@
+# =============================================================================
+# MariaDB — local development overrides
+# Exposes DB port for desktop clients (TablePlus, DBeaver, etc.)
+# =============================================================================
+
+services:
+  mariadb:
+    ports:
+      - '${DB_PORT:-3306}:3306'
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'

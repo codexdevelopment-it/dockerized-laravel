@@ -40,6 +40,7 @@ APP_NAME=""
 CONTAINER_BASE_NAME=""
 REPO_URL_PROJECT=""
 DB_NAME=""
+DB_DRIVER="mariadb"
 NON_INTERACTIVE=false
 SKIP_CONFIRM=false
 
@@ -60,6 +61,7 @@ show_help() {
     echo "    -c, --container <name>       Container base name (e.g., 'myapp' -> 'myapp-mariadb')"
     echo "    -r, --repo <url>             Repository URL (for deployment)"
     echo "    -d, --database <name>        Database name (defaults to container name)"
+    echo "    --db-driver <mariadb|postgres>  Database driver (default: mariadb)"
     echo ""
     echo "    --non-interactive            Run without prompts (requires all options)"
     echo "    -y, --yes                    Skip confirmation prompts"
@@ -165,6 +167,22 @@ prompt_project_type() {
     done
 }
 
+prompt_db_driver() {
+    echo ""
+    echo -e "${BLUE}Database driver?${NC}"
+    echo "  1) MariaDB (default)"
+    echo "  2) PostgreSQL"
+    echo ""
+    while true; do
+        read -r -p "Enter choice [1-2, default 1]: " choice
+        case "$choice" in
+            1|"") DB_DRIVER="mariadb"; break ;;
+            2)    DB_DRIVER="postgres"; break ;;
+            *) print_error "Invalid choice. Please enter 1 or 2." ;;
+        esac
+    done
+}
+
 prompt_inputs() {
     echo ""
     
@@ -196,6 +214,7 @@ print_summary() {
     printf "  %-20s %s\n" "Application name:" "$APP_NAME"
     printf "  %-20s %s\n" "Container name:" "$CONTAINER_BASE_NAME"
     printf "  %-20s %s\n" "Database name:" "$DB_NAME"
+    printf "  %-20s %s\n" "Database driver:" "$DB_DRIVER"
     [[ -n "$REPO_URL_PROJECT" ]] && printf "  %-20s %s\n" "Repository:" "$REPO_URL_PROJECT"
     echo ""
 }
@@ -221,7 +240,7 @@ update_config_file() {
     local file=$1
     local mac_sed_flag=""
     [[ "$(uname)" == "Darwin" ]] && mac_sed_flag=".bak"
-    
+
     if [[ -n "$mac_sed_flag" ]]; then
         sed -i "$mac_sed_flag" "s/{{APP_NAME}}/$APP_NAME/g" "$file"
         sed -i "$mac_sed_flag" "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" "$file"
@@ -234,6 +253,29 @@ update_config_file() {
         sed -i "s/{{DB_NAME}}/$DB_NAME/g" "$file"
         sed -i "s|{{REPO_URL}}|$REPO_URL_PROJECT|g" "$file"
     fi
+}
+
+# Apply postgres-specific overrides to the .env file when DB_DRIVER=postgres
+configure_db_settings() {
+    local file="$1"
+    [[ "$DB_DRIVER" == "mariadb" ]] && return 0
+
+    local mac_sed_flag=""
+    [[ "$(uname)" == "Darwin" ]] && mac_sed_flag=".bak"
+
+    if [[ -n "$mac_sed_flag" ]]; then
+        sed -i "$mac_sed_flag" "s|^DB_DRIVER=.*|DB_DRIVER=postgres|"       "$file"
+        sed -i "$mac_sed_flag" "s|^DB_CONNECTION=.*|DB_CONNECTION=pgsql|"   "$file"
+        sed -i "$mac_sed_flag" "s|^DB_HOST=.*|DB_HOST=postgres|"            "$file"
+        sed -i "$mac_sed_flag" "s|^DB_PORT=.*|DB_PORT=5432|"                "$file"
+        rm -f "${file}.bak" 2>/dev/null
+    else
+        sed -i "s|^DB_DRIVER=.*|DB_DRIVER=postgres|"       "$file"
+        sed -i "s|^DB_CONNECTION=.*|DB_CONNECTION=pgsql|"   "$file"
+        sed -i "s|^DB_HOST=.*|DB_HOST=postgres|"            "$file"
+        sed -i "s|^DB_PORT=.*|DB_PORT=5432|"                "$file"
+    fi
+    print_success "Configured .env for PostgreSQL"
 }
 
 cleanup_on_error() {
@@ -265,7 +307,7 @@ install_dockerized_laravel() {
     ((current_step++))
     print_step $current_step $total_steps "Setting up scripts"
     
-    chmod +x dock scripts/*.sh scripts/lib/*.sh 2>/dev/null || true
+    chmod +x dock scripts/lib/*.sh 2>/dev/null || true
     print_success "Scripts configured"
     
     # Step 3: Update configuration files
@@ -279,6 +321,7 @@ install_dockerized_laravel() {
             print_success "Updated $file"
         fi
     done
+    configure_db_settings ".env"
     
     # Step 4: Handle project type
     ((current_step++))
@@ -390,6 +433,10 @@ parse_args() {
                 DB_NAME="$2"
                 shift 2
                 ;;
+            --db-driver)
+                DB_DRIVER="$2"
+                shift 2
+                ;;
             --non-interactive)
                 NON_INTERACTIVE=true
                 shift
@@ -431,6 +478,7 @@ main() {
         # Interactive mode: prompt for inputs
         prompt_project_type
         prompt_inputs
+        prompt_db_driver
     fi
     
     print_summary

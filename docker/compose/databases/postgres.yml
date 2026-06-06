@@ -1,0 +1,24 @@
+# =============================================================================
+# PostgreSQL — base service definition (no port exposure, bind-mount data dir)
+# Env-specific overrides are in postgres-local.yml / postgres-staging.yml / etc.
+# =============================================================================
+
+services:
+  postgres:
+    container_name: '${CONTAINER_NAME}-postgres'
+    image: 'postgres:16-alpine'
+    restart: '${RESTART_POLICY:-no}'
+    environment:
+      POSTGRES_DB: '${DB_DATABASE}'
+      POSTGRES_USER: '${DB_USERNAME}'
+      POSTGRES_PASSWORD: '${DB_PASSWORD}'
+      TZ: '${APP_TIMEZONE:-Europe/Rome}'
+    volumes:
+      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/postgresql/data'
+    networks:
+      - app-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-app} -d ${DB_DATABASE:-app}']
+      interval: 10s
+      timeout: 5s
+      retries: 3

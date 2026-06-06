@@ -1,0 +1,26 @@
+# =============================================================================
+# MariaDB — base service definition (no port exposure, bind-mount data dir)
+# Env-specific overrides are in mariadb-local.yml / mariadb-staging.yml / etc.
+# =============================================================================
+
+services:
+  mariadb:
+    container_name: '${CONTAINER_NAME}-mariadb'
+    image: 'mariadb:11'
+    restart: '${RESTART_POLICY:-no}'
+    environment:
+      MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: '${DB_DATABASE}'
+      MYSQL_USER: '${DB_USERNAME}'
+      MYSQL_PASSWORD: '${DB_PASSWORD}'
+      TZ: '${APP_TIMEZONE:-Europe/Rome}'
+    volumes:
+      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/mysql'
+    networks:
+      - app-network
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 3

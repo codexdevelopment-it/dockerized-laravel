@@ -27,17 +27,3 @@ services:
         reservations:
           memory: 256M
 
-  # ---------------------------------------------------------------------------
-  # Database - Production Overrides
-  # ---------------------------------------------------------------------------
-  mariadb:
-    # No exposed ports in production (access via network only)
-    volumes:
-      # Production storage mount
-      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/mysql'
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
