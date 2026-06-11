@@ -27,8 +27,12 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Copy dependency files AND auth.json (if it exists) BEFORE running composer
-COPY composer.json composer.lock package.json* package-lock.json* auth.json* ./
+# Copy dependency files AND auth.json (if it exists) BEFORE running composer.
+# composer.json is the only required file: it anchors the COPY (a glob-only
+# COPY with zero matches fails the build). composer.lock is optional so the
+# installer's bootstrap stub and lock-less repos can still build — composer
+# falls back to resolving from composer.json.
+COPY composer.json composer.lock* package.json* package-lock.json* auth.json* ./
 
 RUN if [ "$BUILD_ENV" = "production" ]; then \
         composer install --no-scripts --no-autoloader --prefer-dist --no-dev; \

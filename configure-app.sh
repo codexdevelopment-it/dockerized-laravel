@@ -327,7 +327,13 @@ install_dockerized_laravel() {
     ((current_step++))
     if [[ "$APP_TYPE" == "new" ]]; then
         print_step $current_step $total_steps "Creating new Laravel project"
-        
+
+        # Bootstrap stub: the image must build before the Laravel app exists,
+        # and the Dockerfile anchors its dependency COPY on composer.json.
+        # The real composer.json arrives with `laravel new`; the stub dies
+        # with this clone in the cleanup step.
+        [[ -f composer.json ]] || echo '{}' > composer.json
+
         ./dock start --build
         docker exec "$CONTAINER_BASE_NAME" composer global require laravel/installer
         docker exec -it "$CONTAINER_BASE_NAME" sh -c "~/.composer/vendor/bin/laravel new $CONTAINER_BASE_NAME"
