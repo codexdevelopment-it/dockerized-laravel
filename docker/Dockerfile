@@ -154,8 +154,13 @@ RUN mkdir -p /var/www/html/vendor/laravel/octane/bin \
 
 USER laravel
 
+# NOTE: config:cache is intentionally NOT run here. .env is only mounted at
+# runtime (staging/production), so caching config at build time would bake the
+# framework defaults (env=production, db=sqlite, empty APP_KEY) and Laravel
+# would then ignore the real .env. config/event caching is done post-deploy
+# (./dock deploy), where the real .env is present. Only env-independent caches
+# (routes, views, filament) are safe to bake here.
 RUN if [ "$BUILD_ENV" = "production" ] || [ "$BUILD_ENV" = "staging" ]; then \
-        php artisan config:cache && \
         php artisan route:cache && \
         php artisan view:cache && \
         if php artisan list | grep -q "filament:optimize"; then \
