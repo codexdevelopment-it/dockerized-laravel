@@ -351,7 +351,7 @@ provision_app() {
     fi
 
     # Storage scaffolding (in case the image was built without these dirs).
-    _provision_run "mkdir storage" sh -c 'mkdir -p storage/framework/{sessions,views,cache} storage/app/public storage/logs bootstrap/cache'
+    _provision_run "mkdir storage" sh -c 'mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/app/public storage/logs bootstrap/cache'
     _provision_run "chmod storage" sh -c 'chmod -R 775 storage bootstrap/cache 2>/dev/null'
     _provision_run "chown storage" sh -c 'chown -R laravel:www-data storage bootstrap/cache 2>/dev/null'
     _provision_run "setfacl storage" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/
