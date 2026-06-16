@@ -383,9 +383,9 @@ cmd_stop() {
             *) shift ;;
         esac
     done
-    
+
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    
+
     print_info "Stopping containers..."
     docker_down || true
     print_success "Containers stopped"
@@ -396,7 +396,7 @@ cmd_stop() {
 # -----------------------------------------------------------------------------
 cmd_restart() {
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    
+
     print_info "Restarting containers..."
     docker_restart || true
     print_success "Containers restarted"
@@ -407,10 +407,10 @@ cmd_restart() {
 # -----------------------------------------------------------------------------
 cmd_status() {
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    
+
     print_header "Container Status"
     print_container_status
-    
+
     print_nl
     print_section "${ICON_INFO} Details"
     docker_status
@@ -423,7 +423,7 @@ cmd_logs() {
     local service=""
     local follow=false
     local tail=100
-    
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f|--follow) follow=true; shift ;;
@@ -433,7 +433,7 @@ cmd_logs() {
             *)           service="$1"; shift ;;
         esac
     done
-    
+
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
     docker_logs "$service" "$follow" "$tail"
 }
@@ -443,14 +443,14 @@ cmd_logs() {
 # -----------------------------------------------------------------------------
 cmd_shell() {
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    
+
     local container="${1:-${CONTAINER_NAME}}"
-    
+
     # Handle container name shortcuts
     if [[ -n "$1" ]] && [[ "$1" != "${CONTAINER_NAME}" ]] && [[ "$1" != "${CONTAINER_NAME}-"* ]]; then
         container="${CONTAINER_NAME}-${1}"
     fi
-    
+
     print_info "Opening shell in ${container}..."
     docker exec -it "$container" bash || docker exec -it "$container" sh
 }
@@ -508,12 +508,12 @@ cmd_migrate() {
 # -----------------------------------------------------------------------------
 cmd_fresh() {
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    
+
     if ! is_local_env; then
         print_warning "Running migrate:fresh in ${APP_ENV} environment!"
         confirm "This will DELETE ALL DATA. Are you sure?" || return 1
     fi
-    
+
     docker exec -it "${CONTAINER_NAME}" php artisan migrate:fresh --seed "$@"
 }
 
@@ -725,6 +725,28 @@ cmd_deploy() {
 
     print_info "Building and starting containers..."
     "${PROJECT_ROOT}/dock" start "${dock_args[@]}" || { print_error "Container start failed"; return 1; }
+
+    # ---- Sync built frontend assets to host ---------------------------------
+    # nginx serves static files from the host bind-mount (../../ -> /var/www/html
+    # in servers/nginx.yml), but `public/build` is gitignored, so `git pull`
+    # never delivers the Vite output. The assets ARE built inside the app image
+    # (Dockerfile `npm run build`), so copy them out of the running container
+    # onto the host path nginx reads. Skipped in local (Vite dev server serves
+    # assets there, and the whole project is already mounted).
+    if [[ "${APP_ENV:-local}" != "local" ]]; then
+        if docker exec "${CONTAINER_NAME}" test -d /var/www/html/public/build 2>/dev/null; then
+            print_info "Syncing built assets to host (public/build)..."
+            rm -rf "${PROJECT_ROOT}/public/build"
+            if docker cp "${CONTAINER_NAME}:/var/www/html/public/build/." \
+                "${PROJECT_ROOT}/public/build" 2>/dev/null; then
+                print_success "Assets synced"
+            else
+                print_warning "Asset sync failed - CSS/JS may 404 until resolved"
+            fi
+        else
+            print_warning "No public/build in container - skipping asset sync"
+        fi
+    fi
 
     # ---- Post-deploy --------------------------------------------------------
     print_section "${ICON_GEAR} Post-deploy"
