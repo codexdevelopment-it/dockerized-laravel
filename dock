@@ -614,7 +614,7 @@ cmd_deploy() {
         commit_count=$(git rev-list --count "${current_sha}..${new_sha}" 2>/dev/null || echo "?")
         print_kv "Commits" "${commit_count}"
         echo ""
-        git log --no-merges --pretty="  ${YELLOW}%h${NC} %s ${DIM}(%an)${NC}" \
+        git log --no-merges --pretty="  %C(yellow)%h%C(reset) %s %C(dim)(%an)%C(reset)" \
             "${current_sha}..${new_sha}" 2>/dev/null | head -15 || true
         if [[ "$commit_count" =~ ^[0-9]+$ ]] && (( commit_count > 15 )); then
             echo -e "  ${DIM}... and $((commit_count - 15)) more${NC}"
