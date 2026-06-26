@@ -154,19 +154,16 @@ RUN mkdir -p /var/www/html/vendor/laravel/octane/bin \
 
 USER laravel
 
-# NOTE: config:cache is intentionally NOT run here. .env is only mounted at
-# runtime (staging/production), so caching config at build time would bake the
-# framework defaults (env=production, db=sqlite, empty APP_KEY) and Laravel
-# would then ignore the real .env. config/event caching is done post-deploy
-# (./dock deploy), where the real .env is present. Only env-independent caches
-# (routes, views, filament) are safe to bake here.
+# Only env-INDEPENDENT caches are built here. The real .env (APP_KEY, etc.) is
+# .dockerignored, so it is NOT present at build time. config:cache / route:cache
+# would bake values derived from a NULL APP_KEY into the image -- notably
+# Livewire's "/livewire-<sha256(APP_KEY)>/" asset route prefix. Combined with
+# opcache.validate_timestamps=Off, php-fpm would then keep serving that
+# wrong-key route cache and every Livewire asset 404s. So config/route/event
+# caches are built at RUNTIME by `dock deploy` (which mounts the real .env and
+# reloads php-fpm afterwards). view:cache only compiles Blade -> safe at build.
 RUN if [ "$BUILD_ENV" = "production" ] || [ "$BUILD_ENV" = "staging" ]; then \
-        php artisan route:cache && \
-        php artisan view:cache && \
-        if php artisan list | grep -q "filament:optimize"; then \
-            echo "Filament detected, optimizing..." && \
-            php artisan filament:optimize; \
-        fi; \
+        php artisan view:cache; \
     else \
         echo "Skipping optimizations for ${BUILD_ENV} environment"; \
     fi

@@ -784,6 +784,11 @@ cmd_deploy() {
     docker exec "${CONTAINER_NAME}" php artisan route:cache 2>/dev/null || true
     docker exec "${CONTAINER_NAME}" php artisan view:cache 2>/dev/null || true
     docker exec "${CONTAINER_NAME}" php artisan event:cache 2>/dev/null || true
+    # Filament caches components/icons here (moved out of the image build, which
+    # has no .env) so it runs against the real runtime config.
+    if docker exec "${CONTAINER_NAME}" php artisan list 2>/dev/null | grep -q "filament:optimize"; then
+        docker exec "${CONTAINER_NAME}" php artisan filament:optimize 2>/dev/null || true
+    fi
 
     # Reload the app server so it picks up the freshly rebuilt caches.
     # php-fpm runs with opcache.validate_timestamps=Off, so it never re-reads
