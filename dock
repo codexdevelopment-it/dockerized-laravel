@@ -130,7 +130,7 @@ show_help() {
 
 show_command_help() {
     local cmd="$1"
-    
+
     case "$cmd" in
         start)
             echo ""
@@ -226,7 +226,7 @@ show_command_help() {
 cmd_start() {
     local build=false
     local no_cache=false
-    
+
     # Parse command-specific options
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -236,50 +236,50 @@ cmd_start() {
             *)          shift ;;
         esac
     done
-    
+
     print_header "Dockerized Laravel"
-    
+
     # Load and validate environment
     load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
     validate_full_env "start" || return 1
-    
+
     # Run pre-flight checks
     run_preflight_checks "start" "$PROJECT_ROOT" || return 1
-    
+
     # Print configuration
     print_env_summary
-    
+
     # Start containers
     print_section "${ICON_PACKAGE} Starting Containers"
-    
+
     # Always stream docker output — builds can take minutes and a silent
     # spinner looks frozen. -q suppresses dock's own chatter, not docker's.
     local exit_code=0
     print_info "Starting containers..."
     docker_up "$build" || exit_code=$?
-    
+
     if [[ $exit_code -ne 0 ]]; then
         print_error "Failed to start containers"
         return 1
     fi
-    
+
     print_success "Containers started"
-    
+
     # Give containers a moment to initialize
     sleep 2
-    
+
     # Print status (ignore errors - containers might not be labeled yet)
     print_container_status || true
-    
+
     # Octane setup only when actually using Octane.
     # nginx/caddy talk FastCGI to php-fpm on app:9000 - no octane needed.
     if [[ "${SERVER:-artisan}" == "octane" ]]; then
         setup_octane || true
     fi
-    
+
     # Standard provisioning
     provision_app || true
-    
+
     # Handle artisan serve mode (interactive)
     if [[ "${SERVER:-artisan}" == "artisan" ]]; then
         print_ready "http://localhost:${APP_PORT:-8000}"
@@ -785,8 +785,15 @@ cmd_deploy() {
     docker exec "${CONTAINER_NAME}" php artisan view:cache 2>/dev/null || true
     docker exec "${CONTAINER_NAME}" php artisan event:cache 2>/dev/null || true
 
+    # Reload the app server so it picks up the freshly rebuilt caches.
+    # php-fpm runs with opcache.validate_timestamps=Off, so it never re-reads
+    # bootstrap/cache/*.php after first compile. Without a reload it keeps
+    # serving the build-baked route cache (whose Livewire /livewire-<hash>/
+    # prefix is derived from the OLD APP_KEY) and every Livewire asset 404s.
     if [[ "${SERVER:-artisan}" == "octane" ]]; then
         docker exec "${CONTAINER_NAME}" php artisan octane:reload 2>/dev/null || true
+    else
+        docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/00-base.conf restart php-fpm 2>/dev/null || true
     fi
 
     print_success "Deployment complete!"
@@ -798,7 +805,7 @@ cmd_deploy() {
 # -----------------------------------------------------------------------------
 cmd_install() {
     print_header "Install Dockerized Laravel"
-    
+
     # Source the configure script functionality
     if [[ -f "${PROJECT_ROOT}/configure-app.sh" ]]; then
         bash "${PROJECT_ROOT}/configure-app.sh"
@@ -865,19 +872,19 @@ parse_args() {
 # -----------------------------------------------------------------------------
 main() {
     parse_args "$@"
-    
+
     # Export globals for library functions
     export VERBOSE QUIET DEBUG
-    
+
     # Default to help if no command
     if [[ -z "$COMMAND" ]]; then
         show_help
         exit 0
     fi
-    
+
     # Change to project root
     cd "$PROJECT_ROOT" || exit 1
-    
+
     # Dispatch command
     case "$COMMAND" in
         start)    cmd_start "${ARGS[@]}" ;;
