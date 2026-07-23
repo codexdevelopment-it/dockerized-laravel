@@ -18,7 +18,10 @@
     }
 
     log {
-        output stdout
-        format console
+        output file /data/access.log {
+            roll_size 20mb
+            roll_keep 5
+        }
+        format json
     }
 }
