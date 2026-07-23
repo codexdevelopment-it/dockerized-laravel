@@ -7,9 +7,24 @@
     root * /var/www/html/public
     encode gzip zstd
 
-    php_fastcgi app:9000
+    # Block direct access to any php other than /index.php
+    @blockPhp {
+        path *.php
+        not path /index.php
+    }
+    respond @blockPhp 404
+
+    # Only allow index.php to be executed by PHP-FPM
+    @onlyIndex path /index.php
+
+    php_fastcgi @onlyIndex app:9000 {
+        index index.php
+    }
 
     file_server
+
+    # Laravel handle all other routes via index.php internally
+    try_files {path} /index.php?{query}
 
     header {
         X-Frame-Options "SAMEORIGIN"
