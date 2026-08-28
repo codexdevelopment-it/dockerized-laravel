@@ -23,7 +23,7 @@ Your app is now running at `http://localhost:8000`
 ./dock status             # Show status
 ./dock logs [-f]          # View logs
 ./dock shell              # Shell into app container
-./dock shell mariadb      # Shell into database
+./dock shell db           # Shell into database
 
 ./dock artisan <cmd>      # Run artisan commands
 ./dock composer <cmd>     # Run composer
@@ -44,6 +44,7 @@ Edit `.env` to configure:
 CONTAINER_NAME=myapp      # Container prefix
 APP_ENV=local             # local | staging | production
 SERVER=octane             # artisan | octane | fpm | nginx | caddy
+DB_DRIVER=mariadb         # mariadb | postgres | pgvector
 SERVICES=redis,mailpit    # Additional services (comma-separated)
 APP_PORT=8000             # Application port
 ```
@@ -69,6 +70,21 @@ Base image is `php:8.3-fpm-bookworm` — it ships `php-fpm` and `php-cli`. The F
 | `meilisearch` | 7700 | Full-text search |
 | `phpmyadmin` | 8080 | Database management |
 | `soketi` | 6001 | WebSocket server |
+
+### Database Drivers
+
+`DB_DRIVER` picks the database compose files. Each driver has a base file plus
+`-local` / `-staging` / `-production` overrides (local & staging expose the DB port;
+production adds memory limits). All three run as container `${CONTAINER_NAME}-db`.
+
+| `DB_DRIVER` | Image | Notes |
+|-------------|-------|-------|
+| `mariadb` (default) | `mariadb:11` | `DB_CONNECTION=mysql`, `DB_HOST=mariadb`, `DB_PORT=3306` |
+| `postgres` | `postgres:16-alpine` | `DB_CONNECTION=pgsql`, `DB_HOST=postgres`, `DB_PORT=5432` |
+| `pgvector` | `pgvector/pgvector:pg17` | Same as `postgres` + the `vector` extension (auto-created on a fresh data dir via `docker/config/postgres/pgvector-init.sql`). Same service/host name `postgres`. |
+
+When switching to `postgres`/`pgvector`, also set `DB_CONNECTION=pgsql`, `DB_HOST=postgres`,
+`DB_PORT=5432` in `.env` (the installer does this for you).
 
 ## Installation Options
 
@@ -147,6 +163,7 @@ APP_KEY=                        # leave blank, deploy will generate one
 
 CONTAINER_NAME=myapp            # used as container prefix
 SERVER=octane                   # octane | caddy | nginx | fpm | artisan
+DB_DRIVER=mariadb               # mariadb | postgres | pgvector
 SERVICES=redis                  # comma-separated optional services
 
 DOMAIN=app.example.com          # used by Caddy for auto-HTTPS
@@ -180,7 +197,7 @@ That's it. The command will:
 4. Generate `APP_KEY` if missing, persist host `USER_ID`/`GROUP_ID` into `.env`.
 5. `chmod`/`chown` storage + db data dirs.
 6. `docker compose build && up -d` the containers.
-7. Wait for MariaDB to be healthy.
+7. Wait for the database to be healthy (`pg_isready` for postgres/pgvector).
 8. Run `artisan migrate --force`, `storage:link`, `config/route/view/event:cache`.
 9. `octane:reload` if `SERVER=octane`.
 
@@ -301,7 +318,7 @@ base.yml + environment/{local,staging,production}.yml + server/{artisan,octane,.
 ├── docker/
 │   ├── Dockerfile          # Multi-stage build
 │   ├── compose/
-│   │   ├── base.yml        # Core services (app + mariadb)
+│   │   ├── base.yml        # Core service (app) + app-network
 │   │   ├── environments/   # Environment overrides
 │   │   ├── servers/        # Server-specific configs
 │   │   └── services/       # Optional services

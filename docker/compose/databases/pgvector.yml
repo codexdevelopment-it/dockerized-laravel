@@ -1,12 +1,17 @@
 # =============================================================================
-# PostgreSQL — base service definition (no port exposure, bind-mount data dir)
-# Env-specific overrides are in postgres-local.yml / postgres-staging.yml / etc.
+# PostgreSQL + pgvector — base service definition
+# Same as postgres.yml but ships the `vector` extension
+# (image pgvector/pgvector:pg17). Select with DB_DRIVER=pgvector.
+# Env-specific overrides are in pgvector-local.yml / pgvector-staging.yml / etc.
+#
+# Keeps the service/host name `postgres` so DB_HOST=postgres stays identical to
+# DB_DRIVER=postgres.
 # =============================================================================
 
 services:
   postgres:
     container_name: '${CONTAINER_NAME}-db'
-    image: 'postgres:16-alpine'
+    image: 'pgvector/pgvector:pg17'
     restart: '${RESTART_POLICY:-no}'
     environment:
       POSTGRES_DB: '${DB_DATABASE}'
@@ -15,6 +20,8 @@ services:
       TZ: '${APP_TIMEZONE:-Europe/Rome}'
     volumes:
       - '${DB_MOUNT_PATH:-./db-data}:/var/lib/postgresql/data'
+      # Creates the `vector` extension on a fresh data dir.
+      - '../config/postgres/pgvector-init.sql:/docker-entrypoint-initdb.d/10-pgvector.sql:ro'
     networks:
       - app-network
     healthcheck:

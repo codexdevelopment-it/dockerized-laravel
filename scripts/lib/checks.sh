@@ -79,7 +79,7 @@ check_required_ports() {
         local db_driver="${DB_DRIVER:-mariadb}"
         local default_db_port
         case "$db_driver" in
-            postgres|postgresql) default_db_port=5432 ;;
+            postgres|postgresql|pgvector) default_db_port=5432 ;;
             *) default_db_port=3306 ;;
         esac
         check_port_available "${DB_PORT:-$default_db_port}" "Database port" || ((errors++))

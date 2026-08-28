@@ -146,10 +146,10 @@ validate_db_driver() {
     [[ "$driver" == "postgresql" ]] && driver="postgres"
 
     case "$driver" in
-        mariadb|postgres) return 0 ;;
+        mariadb|postgres|pgvector) return 0 ;;
         *)
             print_error "Invalid DB_DRIVER value: ${driver}"
-            print_info "Valid values: mariadb, postgres"
+            print_info "Valid values: mariadb, postgres, pgvector"
             return 1
             ;;
     esac

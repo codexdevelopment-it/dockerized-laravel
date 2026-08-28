@@ -58,10 +58,10 @@ show_help() {
     echo -e "${BOLD}OPTIONS${NC}"
     echo "    -t, --type <new|existing>    Project type (new or existing Laravel app)"
     echo "    -n, --name <name>            Application name"
-    echo "    -c, --container <name>       Container base name (e.g., 'myapp' -> 'myapp-mariadb')"
+    echo "    -c, --container <name>       Container base name (e.g., 'myapp' -> 'myapp-db')"
     echo "    -r, --repo <url>             Repository URL (for deployment)"
     echo "    -d, --database <name>        Database name (defaults to container name)"
-    echo "    --db-driver <mariadb|postgres>  Database driver (default: mariadb)"
+    echo "    --db-driver <mariadb|postgres|pgvector>  Database driver (default: mariadb)"
     echo ""
     echo "    --non-interactive            Run without prompts (requires all options)"
     echo "    -y, --yes                    Skip confirmation prompts"
@@ -172,13 +172,15 @@ prompt_db_driver() {
     echo -e "${BLUE}Database driver?${NC}"
     echo "  1) MariaDB (default)"
     echo "  2) PostgreSQL"
+    echo "  3) PostgreSQL + pgvector"
     echo ""
     while true; do
-        read -r -p "Enter choice [1-2, default 1]: " choice
+        read -r -p "Enter choice [1-3, default 1]: " choice
         case "$choice" in
             1|"") DB_DRIVER="mariadb"; break ;;
             2)    DB_DRIVER="postgres"; break ;;
-            *) print_error "Invalid choice. Please enter 1 or 2." ;;
+            3)    DB_DRIVER="pgvector"; break ;;
+            *) print_error "Invalid choice. Please enter 1, 2 or 3." ;;
         esac
     done
 }
@@ -255,7 +257,8 @@ update_config_file() {
     fi
 }
 
-# Apply postgres-specific overrides to the .env file when DB_DRIVER=postgres
+# Apply postgres/pgvector overrides to the .env file (no-op for mariadb).
+# Both postgres and pgvector share the same connection/host/port; only DB_DRIVER differs.
 configure_db_settings() {
     local file="$1"
     [[ "$DB_DRIVER" == "mariadb" ]] && return 0
@@ -264,18 +267,18 @@ configure_db_settings() {
     [[ "$(uname)" == "Darwin" ]] && mac_sed_flag=".bak"
 
     if [[ -n "$mac_sed_flag" ]]; then
-        sed -i "$mac_sed_flag" "s|^DB_DRIVER=.*|DB_DRIVER=postgres|"       "$file"
+        sed -i "$mac_sed_flag" "s|^DB_DRIVER=.*|DB_DRIVER=${DB_DRIVER}|"    "$file"
         sed -i "$mac_sed_flag" "s|^DB_CONNECTION=.*|DB_CONNECTION=pgsql|"   "$file"
         sed -i "$mac_sed_flag" "s|^DB_HOST=.*|DB_HOST=postgres|"            "$file"
         sed -i "$mac_sed_flag" "s|^DB_PORT=.*|DB_PORT=5432|"                "$file"
         rm -f "${file}.bak" 2>/dev/null
     else
-        sed -i "s|^DB_DRIVER=.*|DB_DRIVER=postgres|"       "$file"
+        sed -i "s|^DB_DRIVER=.*|DB_DRIVER=${DB_DRIVER}|"    "$file"
         sed -i "s|^DB_CONNECTION=.*|DB_CONNECTION=pgsql|"   "$file"
         sed -i "s|^DB_HOST=.*|DB_HOST=postgres|"            "$file"
         sed -i "s|^DB_PORT=.*|DB_PORT=5432|"                "$file"
     fi
-    print_success "Configured .env for PostgreSQL"
+    print_success "Configured .env for PostgreSQL (${DB_DRIVER})"
 }
 
 cleanup_on_error() {

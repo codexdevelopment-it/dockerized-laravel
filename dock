@@ -118,7 +118,7 @@ show_help() {
     echo "    ./dock logs app                 # View app container logs"
     echo "    ./dock artisan migrate          # Run migrations"
     echo "    ./dock shell                    # Enter app container shell"
-    echo "    ./dock shell mariadb            # Enter database container"
+    echo "    ./dock shell db                 # Enter database container"
     echo ""
     echo -e "${BOLD}ENVIRONMENT${NC}"
     echo "    Configure via .env file:"
@@ -753,12 +753,11 @@ cmd_deploy() {
 
     print_info "Waiting for database..."
     local db_driver="${DB_DRIVER:-mariadb}"
-    local db_container db_check=()
-    if [[ "$db_driver" == "postgres" || "$db_driver" == "postgresql" ]]; then
-        db_container="${CONTAINER_NAME}-postgres"
+    local db_container="${CONTAINER_NAME}-db"
+    local db_check=()
+    if [[ "$db_driver" == "postgres" || "$db_driver" == "postgresql" || "$db_driver" == "pgvector" ]]; then
         db_check=(pg_isready -U "${DB_USERNAME:-app}" -d "${DB_DATABASE:-app}")
     else
-        db_container="${CONTAINER_NAME}-mariadb"
         db_check=(healthcheck.sh --connect)
     fi
     local waited=0

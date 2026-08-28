@@ -17,16 +17,19 @@ scripts/
     utils.sh             Spinner, confirm(), prompt(), safe_sed(), string helpers
     env.sh               load_env(), validate_full_env(), parse_services(), get_env_compose_file()
     checks.sh            run_preflight_checks(), port checks, compose file checks, octane check
-    docker.sh            build_compose_command(), docker_up/down/restart/logs/exec/status
+    docker.sh            build_compose_args(), docker_up/down/restart/logs/exec/status
 docker/
   Dockerfile             Multi-stage: builder (composer install + copy) → runtime (php:8.3-fpm-bookworm)
   compose/
-    base.yml             app + mariadb services, app-network
+    base.yml             app service + app-network (no DB service here)
+    databases/           <driver>.yml + <driver>-{local,staging,production}.yml
+                         for driver in: mariadb  postgres  pgvector
     environments/        local.yml  staging.yml  production.yml
     servers/             artisan.yml  fpm.yml  nginx.yml  caddy.yml  octane.yml
     services/            redis.yml  mailpit.yml  meilisearch.yml  phpmyadmin.yml  soketi.yml  gotenberg.yml
   config/
     php/                 base.ini  local.ini  staging.ini  production.ini
+    postgres/            pgvector-init.sql (docker-entrypoint-initdb.d, DB_DRIVER=pgvector)
     supervisor/          base.conf (include glob)  server-*.conf  workers-*.conf
     nginx/               default.conf
     caddy/               Caddyfile
@@ -37,7 +40,7 @@ docker/
 
 `build_compose_args()` in `docker.sh` assembles a `_COMPOSE_ARGS` array (no `eval`):
 1. `docker/compose/base.yml`
-2. `docker/compose/databases/<DB_DRIVER>.yml`          (mariadb | postgres)
+2. `docker/compose/databases/<DB_DRIVER>.yml`          (mariadb | postgres | pgvector)
 3. `docker/compose/databases/<DB_DRIVER>-<env>.yml`    (e.g. mariadb-local.yml — optional)
 4. `docker/compose/environments/<APP_ENV>.yml`          (local | staging | production)
 5. `docker/compose/servers/<SERVER>.yml`                (artisan | fpm | nginx | caddy | octane)
@@ -47,21 +50,27 @@ Everything is driven by `.env`. No separate `docker-compose.yml` lives in the pr
 
 ### Database architecture
 
-MariaDB and PostgreSQL each have a base file (`databases/<driver>.yml`) plus optional env-specific overrides (`databases/<driver>-local.yml` etc.). The env files (`environments/`) contain only app-service overrides — no DB config. This means adding a new DB or new env variant only requires a new file in `databases/`, not touching the env files.
+MariaDB, PostgreSQL and pgvector each have a base file (`databases/<driver>.yml`) plus env-specific overrides (`databases/<driver>-local.yml` / `-staging.yml` / `-production.yml`). The env files (`environments/`) contain only app-service overrides — no DB config. This means adding a new DB or new env variant only requires a new file in `databases/`, not touching the env files.
+
+All three DB services use container name `${CONTAINER_NAME}-db` and join `app-network`.
+
+- `postgres` → plain `postgres:16-alpine` (no build, no vector extension).
+- `pgvector` → `pgvector/pgvector:pg17`; service/host name stays `postgres` so only the image differs. `docker/config/postgres/pgvector-init.sql` runs `CREATE EXTENSION IF NOT EXISTS vector` on a fresh data dir.
+- The `pgvector` name is matched literally: `validate_db_driver` (env.sh), the local-port default (checks.sh) and the deploy DB-wait (`dock`, uses `pg_isready`) all recognise it alongside `postgres`.
 
 ## Key .env variables
 
 | Variable | Purpose |
 |---|---|
-| `CONTAINER_NAME` | Prefix for all containers (`myapp`, `myapp-mariadb`, ...) |
+| `CONTAINER_NAME` | Prefix for all containers (`myapp`, `myapp-db`, ...) |
 | `APP_ENV` | `local` / `staging` / `production` — picks env compose + PHP ini |
-| `DB_DRIVER` | `mariadb` (default) or `postgres` — picks database compose file |
+| `DB_DRIVER` | `mariadb` (default), `postgres`, or `pgvector` — picks database compose file |
 | `SERVER` | Which server compose to load |
 | `SERVICES` | Comma-separated optional services |
 | `APP_PORT` | Host port mapped to container :8000 |
 | `DOMAIN` | Used by Caddy for automatic HTTPS |
 | `STORAGE_MOUNT_PATH` | Host path mounted as `/var/www/html/storage` in prod/staging |
-| `DB_MOUNT_PATH` | Host path for MariaDB data in prod/staging |
+| `DB_MOUNT_PATH` | Host path for database data in prod/staging |
 | `USER_ID` / `GROUP_ID` | Build args for container user, auto-detected by `dock deploy` |
 
 ## Dockerfile design
@@ -89,7 +98,7 @@ MariaDB and PostgreSQL each have a base file (`databases/<driver>.yml`) plus opt
 ## Supervisor
 
 - `base.conf` uses `[include] files = /etc/supervisor/programs/*.conf` — compose files mount specific confs into that dir
-- Workers: `workers-<env>.conf` (queue:work + scheduler loop)
+- Workers: `workers-<env>.conf` (default `queue:work` + scheduler loop)
 - Server: `server-<type>-<env>.conf` or `server-<type>.conf`
 
 ## Deploy flow (`dock deploy`)
@@ -99,7 +108,7 @@ MariaDB and PostgreSQL each have a base file (`databases/<driver>.yml`) plus opt
 3. git pull --rebase --autostash
 4. Ensure USER_ID/GROUP_ID in .env, generate APP_KEY if missing
 5. `dock start --build` (rebuilds image)
-6. Wait for MariaDB healthcheck (60s timeout, 1s poll)
+6. Wait for DB ready (60s timeout, 1s poll) — `healthcheck.sh` for mariadb, `pg_isready` for postgres/pgvector
 7. `artisan migrate --force`, storage:link, config/route/view/event cache
 8. `artisan octane:reload` if SERVER=octane
 
@@ -113,4 +122,4 @@ MariaDB and PostgreSQL each have a base file (`databases/<driver>.yml`) plus opt
 - `provision_app()` always returns 0 (best-effort); failures only shown in `--verbose`
 - `check_required_ports()` treats port conflicts as warnings (not errors) — you still get a URL even if the port is taken
 - `docker_up` in non-verbose mode suppresses all output (`>/dev/null 2>&1`) — this conflicts with the comment "Always stream docker output" in `cmd_start`; currently a known inconsistency
-- `eval` is used to run compose commands built as strings in `docker.sh`
+- `docker.sh` builds a `_COMPOSE_ARGS` array and runs it directly — no `eval`, no string command

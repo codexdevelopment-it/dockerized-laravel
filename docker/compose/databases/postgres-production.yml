@@ -1,0 +1,13 @@
+# =============================================================================
+# PostgreSQL — production overrides
+# No port exposure. Memory limits tuned for a typical VPS.
+# =============================================================================
+
+services:
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M

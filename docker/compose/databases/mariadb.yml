@@ -5,7 +5,7 @@
 
 services:
   mariadb:
-    container_name: '${CONTAINER_NAME}-mariadb'
+    container_name: '${CONTAINER_NAME}-db'
     image: 'mariadb:11'
     restart: '${RESTART_POLICY:-no}'
     environment:
