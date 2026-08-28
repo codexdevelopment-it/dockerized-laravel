@@ -10,3 +10,13 @@ services:
     volumes:
       # Per-env octane tuning. APP_ENV is interpolated from .env at compose-time.
       - '../config/supervisor/server-octane-${APP_ENV:-local}.conf:/etc/supervisor/programs/20-server.conf:ro'
+
+      # FrankenPHP is a static binary with its OWN embedded PHP. It does NOT read
+      # /usr/local/etc/php/conf.d (that path is the image's php-fpm / php-cli only)
+      # and otherwise falls back to compiled-in defaults — notably post_max_size=8M,
+      # which resets the connection on larger uploads. The static binary instead
+      # scans /etc/frankenphp/php.d/*.ini, so the same tuning files are mounted
+      # there. These inis hold directives only (no `extension=` lines), so they are
+      # safe for FrankenPHP's statically-linked extensions.
+      - '../config/php/base.ini:/etc/frankenphp/php.d/00-base.ini:ro'
+      - '../config/php/${APP_ENV:-local}.ini:/etc/frankenphp/php.d/01-environment.ini:ro'

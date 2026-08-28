@@ -85,7 +85,7 @@ All three DB services use container name `${CONTAINER_NAME}-db` and join `app-ne
 | SERVER | How it works |
 |---|---|
 | `artisan` | `docker exec ... php artisan serve` (started in `cmd_start`, interactive) |
-| `octane` | FrankenPHP via supervisor, `server-octane-<env>.conf` |
+| `octane` | FrankenPHP via supervisor, `server-octane-<env>.conf`. FrankenPHP's embedded PHP ignores `/usr/local/etc/php/conf.d`; `octane.yml` mounts the tuning inis into `/etc/frankenphp/php.d/` (its scan dir) instead. |
 | `fpm` | php-fpm only, no reverse proxy |
 | `nginx` | nginx:alpine + php-fpm on app:9000 |
 | `caddy` | caddy:alpine + php-fpm, auto HTTPS via DOMAIN |
@@ -94,6 +94,13 @@ All three DB services use container name `${CONTAINER_NAME}-db` and join `app-ne
 
 - **local**: entire project volume-mounted (`../../:/var/www/html`), DB port exposed, `optimize:clear` on start
 - **staging / production**: only `storage/` and `.env` mounted, code baked in image, opcache with `validate_timestamps=0`
+
+## PHP config (`docker/config/php/`)
+
+`base.ini` + `<env>.ini` (directives only — no `extension=` lines). Mounted into
+`/usr/local/etc/php/conf.d/` for php-fpm / php-cli by `environments/<env>.yml`, **and**
+into `/etc/frankenphp/php.d/` by `servers/octane.yml` because FrankenPHP's static binary
+has its own embedded PHP that only scans `/etc/frankenphp/php.d/*.ini`.
 
 ## Supervisor
 

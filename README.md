@@ -61,6 +61,8 @@ APP_PORT=8000             # Application port
 
 Base image is `php:8.3-fpm-bookworm` — it ships `php-fpm` and `php-cli`. The FrankenPHP binary is installed on top so `octane` mode also works. Pick whichever server fits the app (older Laravel apps that don't support Octane go with `nginx`/`caddy`/`fpm`).
 
+PHP tuning lives in `docker/config/php/` (`base.ini` + `<env>.ini`). For `octane`, FrankenPHP's static binary carries its own embedded PHP and only reads `/etc/frankenphp/php.d/*.ini`, so `servers/octane.yml` mounts those same inis there too (otherwise the worker silently falls back to defaults like `post_max_size=8M`).
+
 ### Available Services
 
 | Service | Ports | Description |

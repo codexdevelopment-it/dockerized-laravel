@@ -107,7 +107,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
     esac && \
     curl -fsSL -o /usr/local/bin/frankenphp \
         "https://github.com/dunglas/frankenphp/releases/download/v${FRANKENPHP_VERSION}/frankenphp-linux-${FP_ARCH}" && \
-    chmod +x /usr/local/bin/frankenphp
+    chmod +x /usr/local/bin/frankenphp && \
+    mkdir -p /etc/frankenphp/php.d
+# ^ /etc/frankenphp/php.d/*.ini is the config scan dir for the static binary's
+#   embedded PHP (SERVER=octane mounts the tuning inis here — see servers/octane.yml).
 
 # Create laravel user matching host UID/GID. UID 0 forbidden (no app-as-root).
 RUN if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
