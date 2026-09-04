@@ -6,7 +6,7 @@
 services:
   mariadb:
     container_name: '${CONTAINER_NAME}-db'
-    image: 'mariadb:11'
+    image: 'mariadb:${MARIADB_VERSION:-11.4}'
     restart: '${RESTART_POLICY:-no}'
     environment:
       MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'

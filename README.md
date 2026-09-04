@@ -81,9 +81,15 @@ production adds memory limits). All three run as container `${CONTAINER_NAME}-db
 
 | `DB_DRIVER` | Image | Notes |
 |-------------|-------|-------|
-| `mariadb` (default) | `mariadb:11` | `DB_CONNECTION=mysql`, `DB_HOST=mariadb`, `DB_PORT=3306` |
-| `postgres` | `postgres:16-alpine` | `DB_CONNECTION=pgsql`, `DB_HOST=postgres`, `DB_PORT=5432` |
-| `pgvector` | `pgvector/pgvector:pg17` | Same as `postgres` + the `vector` extension (auto-created on a fresh data dir via `docker/config/postgres/pgvector-init.sql`). Same service/host name `postgres`. |
+| `mariadb` (default) | `mariadb:11.4` | `DB_CONNECTION=mysql`, `DB_HOST=mariadb`, `DB_PORT=3306` |
+| `postgres` | `postgres:16.15-alpine` | `DB_CONNECTION=pgsql`, `DB_HOST=postgres`, `DB_PORT=5432` |
+| `pgvector` | `pgvector/pgvector:0.8.6-pg17` | Same as `postgres` + the `vector` extension (auto-created on a fresh data dir via `docker/config/postgres/pgvector-init.sql`). Same service/host name `postgres`. |
+
+Tags are pinned to a minor/LTS line so local, staging and production never drift
+apart, and a `dock deploy --build` never silently pulls a newer major that would
+rewrite the (major-locked) data dir. Override per driver in `.env` with
+`MARIADB_VERSION` / `POSTGRES_VERSION` / `PGVECTOR_VERSION`; bump deliberately — a
+same-major bump is safe in place, a major bump needs `pg_upgrade` or dump/restore.
 
 When switching to `postgres`/`pgvector`, also set `DB_CONNECTION=pgsql`, `DB_HOST=postgres`,
 `DB_PORT=5432` in `.env` (the installer does this for you).
@@ -286,7 +292,6 @@ These are known gaps tracked for future work (not blocking the current deploy):
 
 ### Build / runtime
 - **True PHP-FPM mode**: would require switching the base image away from FrankenPHP (e.g. `php:8.3-fpm`) and re-introducing `php-fpm` as a supervisor program. Only worth doing if you really need classic FPM (e.g. integrating with an existing FPM-only ops stack). The current proxy-to-octane approach is simpler and faster.
-- **Pin `mariadb:latest`** to a major version (e.g. `mariadb:11.4`).
 - **Xdebug** install gated by `XDEBUG_MODE` (currently env var is wired but extension not installed).
 - **Multi-arch image builds** (amd64 + arm64) via buildx, with arch-detected octane symlinks (currently both are linked unconditionally).
 - **Scheduler via cron** container instead of `while sleep 60` (drift-free).

@@ -54,8 +54,10 @@ MariaDB, PostgreSQL and pgvector each have a base file (`databases/<driver>.yml`
 
 All three DB services use container name `${CONTAINER_NAME}-db` and join `app-network`.
 
-- `postgres` → plain `postgres:16-alpine` (no build, no vector extension).
-- `pgvector` → `pgvector/pgvector:pg17`; service/host name stays `postgres` so only the image differs. `docker/config/postgres/pgvector-init.sql` runs `CREATE EXTENSION IF NOT EXISTS vector` on a fresh data dir.
+Image tags are pinned to a minor/LTS line and overridable via `.env`: `mariadb:${MARIADB_VERSION:-11.4}`, `postgres:${POSTGRES_VERSION:-16.15}-alpine`, `pgvector/pgvector:${PGVECTOR_VERSION:-0.8.6-pg17}`. Pinning stops silent image bumps on `dock deploy --build` from rewriting the major-locked data dir (irreversible) and keeps local/staging/production identical. Same-major bumps are safe in place; major bumps need `pg_upgrade` or dump/restore.
+
+- `postgres` → plain `postgres:16.15-alpine` (no build, no vector extension).
+- `pgvector` → `pgvector/pgvector:0.8.6-pg17`; service/host name stays `postgres` so only the image differs. `docker/config/postgres/pgvector-init.sql` runs `CREATE EXTENSION IF NOT EXISTS vector` on a fresh data dir.
 - The `pgvector` name is matched literally: `validate_db_driver` (env.sh), the local-port default (checks.sh) and the deploy DB-wait (`dock`, uses `pg_isready`) all recognise it alongside `postgres`.
 
 ## Key .env variables

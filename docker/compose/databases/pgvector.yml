@@ -1,7 +1,7 @@
 # =============================================================================
 # PostgreSQL + pgvector — base service definition
 # Same as postgres.yml but ships the `vector` extension
-# (image pgvector/pgvector:pg17). Select with DB_DRIVER=pgvector.
+# (image pgvector/pgvector:${PGVECTOR_VERSION:-0.8.6-pg17}). Select with DB_DRIVER=pgvector.
 # Env-specific overrides are in pgvector-local.yml / pgvector-staging.yml / etc.
 #
 # Keeps the service/host name `postgres` so DB_HOST=postgres stays identical to
@@ -11,7 +11,7 @@
 services:
   postgres:
     container_name: '${CONTAINER_NAME}-db'
-    image: 'pgvector/pgvector:pg17'
+    image: 'pgvector/pgvector:${PGVECTOR_VERSION:-0.8.6-pg17}'
     restart: '${RESTART_POLICY:-no}'
     environment:
       POSTGRES_DB: '${DB_DATABASE}'

@@ -6,7 +6,7 @@
 services:
   postgres:
     container_name: '${CONTAINER_NAME}-db'
-    image: 'postgres:16-alpine'
+    image: 'postgres:${POSTGRES_VERSION:-16.15}-alpine'
     restart: '${RESTART_POLICY:-no}'
     environment:
       POSTGRES_DB: '${DB_DATABASE}'
