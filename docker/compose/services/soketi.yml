@@ -11,8 +11,8 @@ services:
     ports:
       - '${SOKETI_PORT:-6001}:6001'
     environment:
-      - DEFAULT_APP_ID=${PUSHER_APP_ID:-app-id}
-      - DEFAULT_APP_KEY=${PUSHER_APP_KEY:-app-key}
-      - DEFAULT_APP_SECRET=${PUSHER_APP_SECRET:-app-secret}
+      - SOKETI_DEFAULT_APP_ID=${PUSHER_APP_ID:-some-id}
+      - SOKETI_DEFAULT_APP_KEY=${PUSHER_APP_KEY:-app-key}
+      - SOKETI_DEFAULT_APP_SECRET=${PUSHER_APP_SECRET:-some-app-secret}
     networks:
       - app-network
