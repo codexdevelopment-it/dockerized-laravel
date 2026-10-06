@@ -1,9 +1,9 @@
 # =============================================================================
-# PostgreSQL + pgvector — local development overrides
-# Exposes DB port for desktop clients (TablePlus, DBeaver, etc.)
+# pgvector, local: publish the DB port on SERVICES_BIND (default 127.0.0.1) for
+# desktop clients (TablePlus, DBeaver, ...). Never on all interfaces by default.
 # =============================================================================
 
 services:
   postgres:
     ports:
-      - '${DB_PORT:-5432}:5432'
+      - '${SERVICES_BIND:-127.0.0.1}:${FORWARD_DB_PORT:-5432}:5432'

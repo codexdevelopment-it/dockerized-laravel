@@ -1,281 +1,167 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Docker compose building and execution utilities
+# Compose assembly and container helpers.
+# The compose invocation is an array (_COMPOSE_ARGS): no eval, no string
+# commands, so values from .env can never be executed.
 # =============================================================================
 
-# Prevent double-sourcing
 [[ -n "${_DOCKER_LOADED:-}" ]] && return 0
 _DOCKER_LOADED=1
 
-# Source dependencies
 SCRIPT_LIB_DIR="${SCRIPT_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "${SCRIPT_LIB_DIR}/colors.sh"
 source "${SCRIPT_LIB_DIR}/env.sh"
-source "${SCRIPT_LIB_DIR}/utils.sh"
 
-# Global compose args array — populated by build_compose_args(), consumed as "${_COMPOSE_ARGS[@]}"
 _COMPOSE_ARGS=()
 
-# -----------------------------------------------------------------------------
-# Docker Compose Command Building
-# -----------------------------------------------------------------------------
-
-# Populate _COMPOSE_ARGS with the full docker compose invocation for the current
-# environment. Uses an array to avoid eval and shell-injection via env vars.
+# Fill _COMPOSE_ARGS with: base, database (+ env override), environment,
+# server, then one file per SERVICES entry.
 build_compose_args() {
-    local project_root="${PROJECT_ROOT:-$(get_project_root)}"
-    local compose_dir="${project_root}/docker/compose"
+    local dir="${PROJECT_ROOT}/docker/compose" env db file service
+    prepare_compose_env
+    env="$DOCK_ENV"
+    db="$DB_DRIVER"
 
-    print_verbose "Project root: ${project_root}"
-    print_verbose "Compose dir: ${compose_dir}"
+    _COMPOSE_ARGS=(docker compose -p "${CONTAINER_NAME}")
 
-    _COMPOSE_ARGS=(docker compose)
-
-    # --- Base ---
-    local base_compose="${compose_dir}/base.yml"
-    if [[ ! -f "$base_compose" ]]; then
-        print_error "Base compose file not found: ${base_compose}"
-        return 1
-    fi
-    _COMPOSE_ARGS+=(-f "$base_compose")
-
-    # --- Database ---
-    local db_driver="${DB_DRIVER:-mariadb}"
-    [[ "$db_driver" == "postgresql" ]] && db_driver="postgres"
-    local db_compose="${compose_dir}/databases/${db_driver}.yml"
-    if [[ -f "$db_compose" ]]; then
-        _COMPOSE_ARGS+=(-f "$db_compose")
-    else
-        print_warning "Database compose file not found: ${db_compose}"
-    fi
-
-    # Database env-specific overrides (e.g. databases/mariadb-local.yml)
-    local env_type
-    env_type=$(get_env_compose_file)
-    local db_env_compose="${compose_dir}/databases/${db_driver}-${env_type}.yml"
-    if [[ -f "$db_env_compose" ]]; then
-        _COMPOSE_ARGS+=(-f "$db_env_compose")
-    fi
-
-    # --- Environment ---
-    local env_compose="${compose_dir}/environments/${env_type}.yml"
-    # Fallback to old flat location during migration
-    [[ ! -f "$env_compose" ]] && env_compose="${compose_dir}/${env_type}.yml"
-    if [[ -f "$env_compose" ]]; then
-        _COMPOSE_ARGS+=(-f "$env_compose")
-    else
-        print_warning "Environment compose file not found: ${env_compose}"
-    fi
-
-    # --- Server ---
-    local server="${SERVER:-artisan}"
-    local server_compose="${compose_dir}/servers/${server}.yml"
-    [[ ! -f "$server_compose" ]] && server_compose="${compose_dir}/server/${server}.yml"
-    if [[ -f "$server_compose" ]]; then
-        _COMPOSE_ARGS+=(-f "$server_compose")
-    else
-        print_error "Server compose file not found: ${server}.yml"
-        return 1
-    fi
-
-    # --- Optional services ---
-    local services
-    services=$(parse_services)
-    for service in $services; do
-        local service_compose="${compose_dir}/services/${service}.yml"
-        if [[ -f "$service_compose" ]]; then
-            _COMPOSE_ARGS+=(-f "$service_compose")
-        else
-            print_warning "Service compose file not found: ${service_compose}"
+    for file in "base.yml" "databases/${db}.yml" "databases/${db}-${env}.yml" \
+                "environments/${env}.yml" "servers/${SERVER:-artisan}.yml"; do
+        if [[ -f "${dir}/${file}" ]]; then
+            _COMPOSE_ARGS+=(-f "${dir}/${file}")
+        elif [[ "$file" != "databases/${db}-${env}.yml" ]]; then
+            print_error "Missing compose file: docker/compose/${file}"
+            return 1
         fi
     done
 
-    # --- Project name ---
-    _COMPOSE_ARGS+=(-p "${CONTAINER_NAME:-app}")
+    for service in $(parse_services); do
+        file="${dir}/services/${service}.yml"
+        if [[ ! -f "$file" ]]; then
+            print_error "Unknown service '${service}' in SERVICES (no docker/compose/services/${service}.yml)"
+            return 1
+        fi
+        _COMPOSE_ARGS+=(-f "$file")
+    done
 
-    print_verbose "Compose command: ${_COMPOSE_ARGS[*]}"
+    print_debug "${_COMPOSE_ARGS[*]}"
+}
+
+# compose <args...>: run docker compose with the assembled file list.
+compose() {
+    build_compose_args || return 1
+    "${_COMPOSE_ARGS[@]}" "$@"
+}
+
+# -----------------------------------------------------------------------------
+# Exec helpers. Commands run as the `laravel` user by default: running artisan
+# as root leaves root-owned logs/caches the app can no longer write.
+# -----------------------------------------------------------------------------
+
+# Interactive exec in the app container: -t only with a real terminal, so
+# `./dock artisan ... | grep` and CI work.
+# app_exec [--root] <cmd...>
+app_exec() {
+    local user="laravel" flags=(-i)
+    if [[ "${1:-}" == "--root" ]]; then user="root"; shift; fi
+    [[ -t 0 && -t 1 ]] && flags+=(-t)
+    docker exec "${flags[@]}" -u "$user" "${CONTAINER_NAME}" "$@"
+}
+
+# Non-interactive exec (scripts, deploy). app_run [--root] <cmd...>
+app_run() {
+    local user="laravel"
+    if [[ "${1:-}" == "--root" ]]; then user="root"; shift; fi
+    docker exec -u "$user" "${CONTAINER_NAME}" "$@"
+}
+
+# Same, but output only shown in verbose mode and failures tolerated.
+app_try() {
+    local label="$1"; shift
+    if [[ "${VERBOSE:-false}" == "true" ]]; then
+        app_run "$@" || print_warning "${label} failed (continuing)"
+    else
+        app_run "$@" >/dev/null 2>&1 || true
+    fi
     return 0
 }
 
-# -----------------------------------------------------------------------------
-# Container Operations
-# -----------------------------------------------------------------------------
-
-# Start all containers.
-# Docker output is always streamed — builds can take minutes and a silent terminal
-# looks frozen. The --verbose flag controls dock's own chatter, not Docker's.
-docker_up() {
-    local build="${1:-false}"
-
-    export RESTART_POLICY
-    RESTART_POLICY=$(get_restart_policy)
-
-    build_compose_args || return 1
-
-    print_verbose "Restart policy: ${RESTART_POLICY}"
-
-    local up_args=(up -d --remove-orphans)
-    if [[ "$build" == "true" ]] || [[ "${SERVER:-artisan}" == "octane" ]]; then
-        up_args+=(--build)
-    fi
-
-    "${_COMPOSE_ARGS[@]}" "${up_args[@]}"
-}
-
-# Stop all containers
-docker_down() {
-    export RESTART_POLICY
-    RESTART_POLICY=$(get_restart_policy)
-
-    build_compose_args || return 1
-
-    print_verbose "Stopping containers..."
-
-    if [[ "${VERBOSE:-false}" == "true" ]]; then
-        "${_COMPOSE_ARGS[@]}" down
-    else
-        "${_COMPOSE_ARGS[@]}" down >/dev/null 2>&1
-    fi
-}
-
-# Restart containers
-docker_restart() {
-    docker_down
-    docker_up "${1:-false}"
-}
-
-# Get container status
-docker_status() {
-    export RESTART_POLICY
-    RESTART_POLICY=$(get_restart_policy)
-
-    build_compose_args || return 1
-    "${_COMPOSE_ARGS[@]}" ps --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}'
-}
-
-# Get container logs
-docker_logs() {
-    local service="${1:-}"
-    local follow="${2:-false}"
-    local tail="${3:-100}"
-
-    export RESTART_POLICY
-    RESTART_POLICY=$(get_restart_policy)
-
-    build_compose_args || return 1
-
-    local log_args=(logs "--tail=${tail}")
-    [[ "$follow" == "true" ]] && log_args+=(-f)
-    [[ -n "$service" ]] && log_args+=("$service")
-
-    "${_COMPOSE_ARGS[@]}" "${log_args[@]}"
-}
-
-# Execute command in container
-docker_exec() {
-    local container="${1:-${CONTAINER_NAME}}"
-    shift
-
-    if [[ $# -eq 0 ]]; then
-        docker exec -it "$container" bash
-    else
-        docker exec -it "$container" "$@"
-    fi
-}
-
-# -----------------------------------------------------------------------------
-# Container Health & Status
-# -----------------------------------------------------------------------------
-
-# Check if a container is running
-is_container_running() {
-    local container="$1"
-    docker ps --format '{{.Names}}' | grep -q "^${container}$"
-}
-
-# Wait for container to be healthy
-wait_for_container() {
-    local container="$1"
-    local timeout="${2:-60}"
-    local elapsed=0
-
-    while (( elapsed < timeout )); do
-        if is_container_running "$container"; then
-            return 0
-        fi
-        sleep 1
-        ((elapsed++))
-    done
-
-    return 1
-}
-
-# Get running container names for current project
-get_running_containers() {
-    local project="${CONTAINER_NAME:-app}"
-    docker ps --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}'
-}
-
-# Print container status in a nice format
-print_container_status() {
-    local containers
-    containers=$(get_running_containers)
-
-    if [[ -z "$containers" ]]; then
-        print_warning "No containers running"
+ensure_app_running() {
+    if ! is_container_running "${CONTAINER_NAME}"; then
+        print_error "Container '${CONTAINER_NAME}' is not running. Start it with: ./dock start"
         return 1
     fi
+}
 
-    print_section "${ICON_PACKAGE} Container Status"
+is_container_running() {
+    [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" == "true" ]]
+}
 
-    local count=0
-    local total
-    total=$(echo "$containers" | wc -l | tr -d ' ')
+supervisorctl_app() {
+    app_run --root supervisorctl -c /etc/supervisor/conf.d/00-base.conf "$@"
+}
 
-    while IFS= read -r container; do
-        ((count++))
-        local status
-        status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null)
+# Restart the HTTP server program after caches/code change.
+reload_app_server() {
+    case "${SERVER:-artisan}" in
+        octane) app_run php artisan octane:reload >/dev/null 2>&1 || supervisorctl_app restart octane >/dev/null 2>&1 ;;
+        nginx|caddy|fpm) supervisorctl_app restart php-fpm >/dev/null 2>&1 ;;
+        artisan) supervisorctl_app restart artisan-serve >/dev/null 2>&1 ;;
+    esac
+    return 0
+}
 
-        local status_icon
-        case "$status" in
-            running) status_icon="${GREEN}${CHECKMARK} running${NC}" ;;
-            exited)  status_icon="${RED}${CROSSMARK} exited${NC}" ;;
-            *)       status_icon="${YELLOW}● ${status}${NC}" ;;
+# Shown at the end of start/deploy.
+app_url() {
+    case "${SERVER:-artisan}" in
+        caddy)
+            if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "localhost" ]]; then
+                echo "https://${DOMAIN}"
+            else
+                echo "https://localhost$([[ "${HTTPS_PORT:-443}" != 443 ]] && echo ":${HTTPS_PORT}")"
+            fi ;;
+        fpm) echo "fastcgi://127.0.0.1:${APP_PORT:-9000}" ;;
+        *)   echo "http://localhost:${APP_PORT:-8000}" ;;
+    esac
+}
+
+# Image tag of the app for the current env/server.
+app_image() { echo "${CONTAINER_NAME}:${DOCK_ENV:-local}${DOCK_IMAGE_SUFFIX:-}"; }
+
+app_image_exists() { docker image inspect "$(app_image)" >/dev/null 2>&1; }
+
+# "0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 9000/tcp" -> "8000" ; 127.0.0.1 kept explicit.
+_compact_ports() {
+    tr ',' '\n' | sed -n 's/^ *\([^ ]*\):\([0-9]*\)->\([0-9]*\).*/\1 \2/p' \
+        | awk '{ if ($1 == "127.0.0.1") p = "127.0.0.1:" $2; else p = $2; if (!seen[p]++) printf "%s%s", (n++ ? ", " : ""), p }'
+}
+
+# Table of the project's containers: service, state, health, published ports.
+print_container_status() {
+    local rows service state health ports icon color
+    rows="$(compose ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.Ports}}' 2>/dev/null | sort)"
+    if [[ -z "$rows" ]]; then
+        print_warning "No containers for project '${CONTAINER_NAME}' (./dock start)"
+        return 1
+    fi
+    _is_quiet && return 0
+
+    echo ""
+    printf "  ${DIM}%-14s %-12s %-11s %s${NC}\n" "SERVICE" "STATE" "HEALTH" "PORTS"
+    while IFS='|' read -r service state health ports; do
+        case "$state:$health" in
+            running:unhealthy) icon="●"; color="$YELLOW" ;;
+            running:starting)  icon="●"; color="$CYAN" ;;
+            running:*)         icon="●"; color="$GREEN" ;;
+            restarting:*)      icon="↻"; color="$YELLOW" ;;
+            *)                 icon="○"; color="$RED" ;;
         esac
-
-        local is_last="false"
-        [[ $count -eq $total ]] && is_last="true"
-
-        local display_name="${container#${CONTAINER_NAME}-}"
-        [[ "$display_name" == "$CONTAINER_NAME" ]] && display_name="app"
-
-        print_tree_item "$display_name" "$status_icon" "$is_last"
-    done <<< "$containers"
-}
-
-# -----------------------------------------------------------------------------
-# Build Operations
-# -----------------------------------------------------------------------------
-
-# Build containers
-docker_build() {
-    export RESTART_POLICY
-    RESTART_POLICY=$(get_restart_policy)
-
-    build_compose_args || return 1
-
-    print_info "Building containers..."
-    "${_COMPOSE_ARGS[@]}" build
-}
-
-# Pull latest images
-docker_pull() {
-    export RESTART_POLICY
-    RESTART_POLICY=$(get_restart_policy)
-
-    build_compose_args || return 1
-
-    print_info "Pulling images..."
-    "${_COMPOSE_ARGS[@]}" pull
+        case "$health" in
+            healthy)   health="${GREEN}healthy${NC}  " ;;
+            unhealthy) health="${YELLOW}unhealthy${NC}" ;;
+            starting)  health="${CYAN}starting${NC} " ;;
+            *)         health="${DIM}-${NC}        " ;;
+        esac
+        ports="$(echo "$ports" | _compact_ports)"
+        printf "  %-14s ${color}%s %-10s${NC} %b   %s\n" "$service" "$icon" "$state" "$health" "${ports:--}"
+    done <<< "$rows"
 }

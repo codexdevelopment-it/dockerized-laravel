@@ -1,26 +1,36 @@
 # =============================================================================
-# Meilisearch Service
-# Lightning-fast full-text search engine
+# Meilisearch: full-text search (Laravel Scout).
+# The index format is version-locked: bumping MEILISEARCH_VERSION on an
+# existing volume needs a dump/import or `scout:import` into a fresh volume.
+# Set MEILISEARCH_KEY (16+ chars) and MEILI_ENV=production outside local.
 # =============================================================================
 
 services:
   meilisearch:
     container_name: '${CONTAINER_NAME}-meilisearch'
-    image: getmeili/meilisearch:v1.5.0
+    image: 'getmeili/meilisearch:${MEILISEARCH_VERSION:-v1.54}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${MEILISEARCH_PORT:-7700}:7700'
+      - '${SERVICES_BIND:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700'
     environment:
       - MEILI_MASTER_KEY=${MEILISEARCH_KEY:-masterkey}
       - MEILI_NO_ANALYTICS=true
       - MEILI_ENV=${MEILI_ENV:-development}
       - MEILI_DB_PATH=/data.ms
-      - TZ=${APP_TIMEZONE:-UTC}
     volumes:
       - meilisearch-data:/data.ms
     networks:
       - app-network
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://127.0.0.1:7700/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
 
 volumes:
   meilisearch-data:
-    driver: local

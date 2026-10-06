@@ -1,6 +1,7 @@
 # =============================================================================
-# MariaDB — base service definition (no port exposure, bind-mount data dir)
-# Env-specific overrides are in mariadb-local.yml / mariadb-staging.yml / etc.
+# MariaDB: base service (no published port, bind-mounted data dir).
+# Env overrides: mariadb-local.yml / -staging.yml / -production.yml.
+# MARIADB_VERSION is pinned to an LTS line: never let a rebuild silently change it.
 # =============================================================================
 
 services:
@@ -9,18 +10,25 @@ services:
     image: 'mariadb:${MARIADB_VERSION:-11.4}'
     restart: '${RESTART_POLICY:-no}'
     environment:
-      MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
-      MYSQL_ROOT_HOST: '%'
-      MYSQL_DATABASE: '${DB_DATABASE}'
-      MYSQL_USER: '${DB_USERNAME}'
-      MYSQL_PASSWORD: '${DB_PASSWORD}'
-      TZ: '${APP_TIMEZONE:-Europe/Rome}'
+      MARIADB_ROOT_PASSWORD: '${DB_ROOT_PASSWORD:-${DB_PASSWORD}}'
+      MARIADB_DATABASE: '${DB_DATABASE}'
+      MARIADB_USER: '${DB_USERNAME}'
+      MARIADB_PASSWORD: '${DB_PASSWORD}'
+      # Runs mariadb-upgrade after a deliberate MARIADB_VERSION bump.
+      MARIADB_AUTO_UPGRADE: '1'
+      TZ: '${APP_TIMEZONE:-UTC}'
     volumes:
-      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/mysql'
+      - '${DB_MOUNT_PATH}:/var/lib/mysql'
     networks:
       - app-network
     healthcheck:
       test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

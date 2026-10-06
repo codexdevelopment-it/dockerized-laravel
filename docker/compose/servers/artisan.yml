@@ -1,10 +1,10 @@
 # =============================================================================
-# Artisan Serve (dev only)
-# `php artisan serve` is started interactively by the dock CLI on `./dock start`.
-# Supervisor only runs the workers - no server program in this mode.
+# artisan: `php artisan serve` under supervisor (dev only).
 # =============================================================================
 
 services:
   app:
     ports:
-      - '${APP_PORT:-8000}:80'
+      - '${APP_PORT:-8000}:8000'
+    volumes:
+      - '../config/supervisor/server-artisan.conf:/etc/supervisor/programs/20-server.conf:ro'

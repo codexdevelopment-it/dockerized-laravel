@@ -1,503 +1,399 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Dockerized Laravel - Installation Script
-# Sets up a new or existing Laravel project with Docker configuration
+# Dockerized Laravel - installer
+#
+#   bash <(curl -fsSL https://raw.githubusercontent.com/Murkrow02/dockerized-laravel/main/configure-app.sh)
+#
+# existing: run from the Laravel project root; adds dock, scripts/, docker/
+#           and merges the dock settings into the existing .env.
+# new:      creates ./<container-name>/ with a fresh Laravel app (composer
+#           create-project inside the dock image, nothing needed on the host).
 # =============================================================================
 
-set -e
+set -eu
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
-REPO_URL="https://github.com/Murkrow02/dockerized-laravel"
-VERSION="2.0.0"
+VERSION="3.0.0"
+REPO_URL="${DOCKERIZED_LARAVEL_REPO:-https://github.com/Murkrow02/dockerized-laravel}"
+REPO_BRANCH="${DOCKERIZED_LARAVEL_BRANCH:-main}"
 
-# Colors and formatting
-if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    CYAN='\033[0;36m'
-    BOLD='\033[1m'
-    DIM='\033[2m'
-    NC='\033[0m'
+if [[ -t 1 && "${TERM:-}" != "dumb" && -z "${NO_COLOR:-}" ]]; then
+    RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m'
+    CYAN='\033[0;36m' BOLD='\033[1m' DIM='\033[2m' NC='\033[0m'
 else
     RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' DIM='' NC=''
 fi
 
-# Icons
-ICON_DOCKER="🐳"
-ICON_CHECK="✓"
-ICON_CROSS="✗"
-ICON_ARROW="→"
-
-# -----------------------------------------------------------------------------
-# Default Values
-# -----------------------------------------------------------------------------
 APP_TYPE=""
 APP_NAME=""
 CONTAINER_BASE_NAME=""
-REPO_URL_PROJECT=""
 DB_NAME=""
 DB_DRIVER="mariadb"
+SERVER="artisan"
 NON_INTERACTIVE=false
 SKIP_CONFIRM=false
+TMP_DIR=""
 
 # -----------------------------------------------------------------------------
-# Help
+# Output
 # -----------------------------------------------------------------------------
-show_help() {
-    echo ""
-    echo -e "${BOLD}${ICON_DOCKER} Dockerized Laravel Installer${NC} v${VERSION}"
-    echo ""
-    echo -e "${BOLD}USAGE${NC}"
-    echo "    ./configure-app.sh [options]"
-    echo "    bash <(curl -s ${REPO_URL}/raw/main/configure-app.sh) [options]"
-    echo ""
-    echo -e "${BOLD}OPTIONS${NC}"
-    echo "    -t, --type <new|existing>    Project type (new or existing Laravel app)"
-    echo "    -n, --name <name>            Application name"
-    echo "    -c, --container <name>       Container base name (e.g., 'myapp' -> 'myapp-db')"
-    echo "    -r, --repo <url>             Repository URL (for deployment)"
-    echo "    -d, --database <name>        Database name (defaults to container name)"
-    echo "    --db-driver <mariadb|postgres|pgvector>  Database driver (default: mariadb)"
-    echo ""
-    echo "    --non-interactive            Run without prompts (requires all options)"
-    echo "    -y, --yes                    Skip confirmation prompts"
-    echo "    -h, --help                   Show this help message"
-    echo "    -V, --version                Show version"
-    echo ""
-    echo -e "${BOLD}EXAMPLES${NC}"
-    echo "    # Interactive mode"
-    echo "    ./configure-app.sh"
-    echo ""
-    echo "    # Non-interactive: new project"
-    echo "    ./configure-app.sh -t new -n \"My App\" -c myapp --non-interactive"
-    echo ""
-    echo "    # Non-interactive: existing project"
-    echo "    ./configure-app.sh -t existing -n \"My App\" -c myapp -r https://github.com/user/repo --non-interactive"
-    echo ""
-}
+print_success() { echo -e "${GREEN}✓${NC} $*"; }
+print_error()   { echo -e "${RED}✗${NC} $*" >&2; }
+print_info()    { echo -e "${BLUE}→${NC} $*"; }
+print_warning() { echo -e "${YELLOW}!${NC} $*"; }
+print_step()    { echo ""; echo -e "${BOLD}[$1/$2]${NC} $3"; echo -e "${DIM}────────────────────────────────────────${NC}"; }
 
-# -----------------------------------------------------------------------------
-# Output Functions
-# -----------------------------------------------------------------------------
 print_header() {
     echo ""
     echo -e "${CYAN}╭──────────────────────────────────────────╮${NC}"
-    echo -e "${CYAN}│${NC}  ${BOLD}${ICON_DOCKER} Dockerized Laravel Installer${NC}"
-    echo -e "${CYAN}│${NC}  ${DIM}v${VERSION}${NC}"
+    echo -e "${CYAN}│${NC}  ${BOLD}🐳 Dockerized Laravel Installer${NC} ${DIM}v${VERSION}${NC}"
     echo -e "${CYAN}╰──────────────────────────────────────────╯${NC}"
-    echo ""
 }
 
-print_success() { echo -e "${GREEN}${ICON_CHECK}${NC} $*"; }
-print_error() { echo -e "${RED}${ICON_CROSS}${NC} $*" >&2; }
-print_info() { echo -e "${BLUE}${ICON_ARROW}${NC} $*"; }
-print_warning() { echo -e "${YELLOW}!${NC} $*"; }
+show_help() {
+    cat <<EOF
+Dockerized Laravel installer v${VERSION}
 
-print_step() {
-    local step=$1
-    local total=$2
-    local message=$3
-    echo ""
-    echo -e "${BOLD}[${step}/${total}]${NC} ${message}"
-    echo -e "${DIM}$(printf '─%.0s' {1..40})${NC}"
+USAGE
+    bash <(curl -fsSL ${REPO_URL}/raw/${REPO_BRANCH}/configure-app.sh) [options]
+
+OPTIONS
+    -t, --type <new|existing>   New Laravel app, or add Docker to the current project
+    -n, --name <name>           Application name
+    -c, --container <name>      Container prefix, lowercase (myapp -> myapp, myapp-db, ...)
+    -d, --database <name>       Database name (default: container name, '-' -> '_')
+    --db-driver <driver>        mariadb (default) | postgres | pgvector
+    --server <server>           artisan (default) | octane | nginx | caddy | fpm
+    --non-interactive           No prompts (needs -t, -n, -c)
+    -y, --yes                   Don't ask for confirmation
+    -h, --help | -V, --version
+
+ENVIRONMENT
+    DOCKERIZED_LARAVEL_REPO, DOCKERIZED_LARAVEL_BRANCH   Install from a fork/branch
+
+EXAMPLES
+    ./configure-app.sh
+    ./configure-app.sh -t new -n "My App" -c myapp --non-interactive
+    ./configure-app.sh -t existing -n "My App" -c myapp --db-driver postgres -y
+EOF
 }
 
 # -----------------------------------------------------------------------------
-# Validation Functions
+# Helpers
 # -----------------------------------------------------------------------------
-validate_name() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        print_error "Name cannot be empty"
-        return 1
+safe_sed() { if sed --version &>/dev/null; then sed -i "$@"; else sed -i '' "$@"; fi; }
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
+
+# set_env_value <file> <KEY> <value>: replace an uncommented KEY= or append.
+set_env_value() {
+    if grep -qE "^$2=" "$1"; then
+        safe_sed "s|^$2=.*|$2=$(sed_escape "$3")|" "$1"
+    else
+        printf '%s=%s\n' "$2" "$3" >> "$1"
     fi
-    return 0
 }
 
+get_env_value() {
+    local v
+    v="$(grep -E "^$2=" "$1" 2>/dev/null | tail -n1 | cut -d= -f2-)" || true
+    v="${v#\"}"; v="${v%\"}"
+    printf '%s' "$v"
+}
+
+random_password() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
+
+slugify() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' _' '--' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//'; }
+
+# append_missing_lines <source> <target>: add lines of source missing from target.
+append_missing_lines() {
+    local line added=false
+    touch "$2"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        if ! grep -qxF "$line" "$2"; then
+            if [[ "$added" == false ]]; then
+                [[ -s "$2" && -n "$(tail -c1 "$2")" ]] && echo "" >> "$2"
+                printf '\n# dockerized-laravel\n' >> "$2"
+                added=true
+            fi
+            echo "$line" >> "$2"
+        fi
+    done < "$1"
+}
+
+cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; return 0; }
+trap cleanup EXIT
+
+# -----------------------------------------------------------------------------
+# Validation and prompts
+# -----------------------------------------------------------------------------
 validate_container_name() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        print_error "Container name cannot be empty"
+    if [[ ! "$1" =~ ^[a-z0-9][a-z0-9_.-]+$ ]]; then
+        print_error "Container name: 2+ chars, lowercase letters, digits, '-', '_', '.'"
         return 1
     fi
-    # Container names must be lowercase alphanumeric with hyphens
-    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]] && [[ ! "$name" =~ ^[a-z0-9]$ ]]; then
-        print_error "Container name must be lowercase alphanumeric (hyphens allowed)"
-        return 1
-    fi
-    return 0
 }
 
 validate_inputs() {
-    local errors=0
-    
-    if [[ -z "$APP_TYPE" ]]; then
-        print_error "Project type is required (-t new|existing)"
-        ((errors++))
-    elif [[ "$APP_TYPE" != "new" ]] && [[ "$APP_TYPE" != "existing" ]]; then
-        print_error "Invalid project type: $APP_TYPE (must be 'new' or 'existing')"
-        ((errors++))
-    fi
-    
-    validate_name "$APP_NAME" || ((errors++))
-    validate_container_name "$CONTAINER_BASE_NAME" || ((errors++))
-    
-    return $errors
+    local ok=true
+    case "$APP_TYPE" in
+        new|existing) ;;
+        *) print_error "Project type must be 'new' or 'existing' (-t)"; ok=false ;;
+    esac
+    [[ -n "$APP_NAME" ]] || { print_error "Application name is required (-n)"; ok=false; }
+    validate_container_name "$CONTAINER_BASE_NAME" || ok=false
+    case "$DB_DRIVER" in mariadb|postgres|pgvector) ;; *) print_error "Invalid --db-driver: $DB_DRIVER"; ok=false ;; esac
+    case "$SERVER" in artisan|octane|nginx|caddy|fpm) ;; *) print_error "Invalid --server: $SERVER"; ok=false ;; esac
+    [[ "$ok" == true ]]
 }
 
-# -----------------------------------------------------------------------------
-# Interactive Prompts
-# -----------------------------------------------------------------------------
-prompt_project_type() {
-    echo -e "${BLUE}What type of project?${NC}"
-    echo "  1) New Laravel application"
-    echo "  2) Existing Laravel application"
+# choose <var> <prompt> <default-index> <options...>
+choose() {
+    local var="$1" prompt="$2" def="$3" i=1 choice opt
+    shift 3
     echo ""
+    echo -e "${BLUE}${prompt}${NC}"
+    for opt in "$@"; do echo "  $i) $opt"; i=$((i + 1)); done
     while true; do
-        read -r -p "Enter choice [1-2]: " choice
-        case "$choice" in
-            1) APP_TYPE="new"; break ;;
-            2) APP_TYPE="existing"; break ;;
-            *) print_error "Invalid choice. Please enter 1 or 2." ;;
-        esac
-    done
-}
-
-prompt_db_driver() {
-    echo ""
-    echo -e "${BLUE}Database driver?${NC}"
-    echo "  1) MariaDB (default)"
-    echo "  2) PostgreSQL"
-    echo "  3) PostgreSQL + pgvector"
-    echo ""
-    while true; do
-        read -r -p "Enter choice [1-3, default 1]: " choice
-        case "$choice" in
-            1|"") DB_DRIVER="mariadb"; break ;;
-            2)    DB_DRIVER="postgres"; break ;;
-            3)    DB_DRIVER="pgvector"; break ;;
-            *) print_error "Invalid choice. Please enter 1, 2 or 3." ;;
-        esac
+        read -r -p "Choice [${def}]: " choice
+        choice="${choice:-$def}"
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= $# )); then
+            eval "$var=\"\${$choice%% *}\""
+            return
+        fi
+        print_error "Enter a number between 1 and $#"
     done
 }
 
 prompt_inputs() {
+    local suggested answer
+    if [[ -z "$APP_TYPE" ]]; then
+        choose APP_TYPE "Project type?" 2 "new       (create a new Laravel app)" "existing  (add Docker to this project)"
+    fi
     echo ""
-    
-    read -r -p "$(echo -e "${BLUE}Application name:${NC} ")" APP_NAME
-    validate_name "$APP_NAME" || { prompt_inputs; return; }
-    
-    # Suggest a container name based on app name
-    local suggested_container
-    suggested_container=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
-    
-    read -r -p "$(echo -e "${BLUE}Container base name${NC} [${suggested_container}]: ")" CONTAINER_BASE_NAME
-    CONTAINER_BASE_NAME="${CONTAINER_BASE_NAME:-$suggested_container}"
-    validate_container_name "$CONTAINER_BASE_NAME" || { prompt_inputs; return; }
-    
-    read -r -p "$(echo -e "${BLUE}Repository URL${NC} (optional, for deployment): ")" REPO_URL_PROJECT
-    
-    read -r -p "$(echo -e "${BLUE}Database name${NC} [${CONTAINER_BASE_NAME}]: ")" DB_NAME
-    DB_NAME="${DB_NAME:-$CONTAINER_BASE_NAME}"
+    while [[ -z "$APP_NAME" ]]; do
+        read -r -p "$(echo -e "${BLUE}Application name:${NC} ")" APP_NAME
+    done
+    suggested="$(slugify "$APP_NAME")"
+    while true; do
+        read -r -p "$(echo -e "${BLUE}Container name${NC} [${suggested}]: ")" answer
+        CONTAINER_BASE_NAME="${answer:-$suggested}"
+        validate_container_name "$CONTAINER_BASE_NAME" && break
+    done
+    suggested="$(echo "$CONTAINER_BASE_NAME" | tr '.-' '__')"
+    read -r -p "$(echo -e "${BLUE}Database name${NC} [${suggested}]: ")" answer
+    DB_NAME="${answer:-$suggested}"
+    choose DB_DRIVER "Database?" 1 "mariadb   (MariaDB 11.4 LTS)" "postgres  (PostgreSQL 16)" "pgvector  (PostgreSQL + pgvector)"
+    choose SERVER "Server?" 1 "artisan   (php artisan serve, simplest for dev)" "octane    (FrankenPHP, needs laravel/octane)" "nginx     (nginx + php-fpm)" "caddy     (caddy + php-fpm, automatic HTTPS)" "fpm       (php-fpm only)"
 }
 
-# -----------------------------------------------------------------------------
-# Configuration Summary
-# -----------------------------------------------------------------------------
 print_summary() {
     echo ""
-    echo -e "${BOLD}Configuration Summary${NC}"
-    echo -e "${DIM}$(printf '─%.0s' {1..40})${NC}"
-    printf "  %-20s %s\n" "Project type:" "$APP_TYPE"
-    printf "  %-20s %s\n" "Application name:" "$APP_NAME"
-    printf "  %-20s %s\n" "Container name:" "$CONTAINER_BASE_NAME"
-    printf "  %-20s %s\n" "Database name:" "$DB_NAME"
-    printf "  %-20s %s\n" "Database driver:" "$DB_DRIVER"
-    [[ -n "$REPO_URL_PROJECT" ]] && printf "  %-20s %s\n" "Repository:" "$REPO_URL_PROJECT"
+    echo -e "${BOLD}Summary${NC}"
+    printf "  %-16s %s\n" "Type" "$APP_TYPE" "App name" "$APP_NAME" "Container" "$CONTAINER_BASE_NAME" \
+        "Database" "$DB_NAME ($DB_DRIVER)" "Server" "$SERVER" "Directory" "$TARGET_DIR"
     echo ""
 }
 
 confirm_proceed() {
-    if [[ "$SKIP_CONFIRM" == "true" ]]; then
-        return 0
-    fi
-    
-    read -r -p "$(echo -e "${YELLOW}Proceed with installation?${NC} [Y/n]: ")" response
-    # Use tr for bash 3.x compatibility (macOS default)
-    response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
-    case "$response" in
-        n|no) return 1 ;;
-        *)    return 0 ;;
-    esac
+    [[ "$SKIP_CONFIRM" == true ]] && return 0
+    local response
+    read -r -p "$(echo -e "${YELLOW}Proceed?${NC} [Y/n]: ")" response
+    case "$response" in n|N|no|NO) return 1 ;; *) return 0 ;; esac
 }
 
 # -----------------------------------------------------------------------------
-# Installation Functions
+# Installation steps
 # -----------------------------------------------------------------------------
-update_config_file() {
-    local file=$1
-    local mac_sed_flag=""
-    [[ "$(uname)" == "Darwin" ]] && mac_sed_flag=".bak"
-
-    if [[ -n "$mac_sed_flag" ]]; then
-        sed -i "$mac_sed_flag" "s/{{APP_NAME}}/$APP_NAME/g" "$file"
-        sed -i "$mac_sed_flag" "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" "$file"
-        sed -i "$mac_sed_flag" "s/{{DB_NAME}}/$DB_NAME/g" "$file"
-        sed -i "$mac_sed_flag" "s|{{REPO_URL}}|$REPO_URL_PROJECT|g" "$file"
-        rm -f "${file}.bak" 2>/dev/null
-    else
-        sed -i "s/{{APP_NAME}}/$APP_NAME/g" "$file"
-        sed -i "s/{{CONTAINER_NAME}}/$CONTAINER_BASE_NAME/g" "$file"
-        sed -i "s/{{DB_NAME}}/$DB_NAME/g" "$file"
-        sed -i "s|{{REPO_URL}}|$REPO_URL_PROJECT|g" "$file"
+download_toolkit() {
+    TMP_DIR="$(mktemp -d)"
+    if [[ -f "$(dirname "$0")/dock" && -d "$(dirname "$0")/docker/compose" ]]; then
+        # Running from a checkout of this repo: use it as-is.
+        cp -R "$(cd "$(dirname "$0")" && pwd)/." "${TMP_DIR}/"
+        rm -rf "${TMP_DIR}/.git"
+        print_success "Using local toolkit $(cd "$(dirname "$0")" && pwd)"
+        return
     fi
+    git clone --quiet --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$TMP_DIR" \
+        || { print_error "Failed to clone ${REPO_URL}"; exit 1; }
+    rm -rf "${TMP_DIR}/.git"
+    print_success "Downloaded ${REPO_URL}@${REPO_BRANCH}"
 }
 
-# Apply postgres/pgvector overrides to the .env file (no-op for mariadb).
-# Both postgres and pgvector share the same connection/host/port; only DB_DRIVER differs.
-configure_db_settings() {
-    local file="$1"
-    [[ "$DB_DRIVER" == "mariadb" ]] && return 0
-
-    local mac_sed_flag=""
-    [[ "$(uname)" == "Darwin" ]] && mac_sed_flag=".bak"
-
-    if [[ -n "$mac_sed_flag" ]]; then
-        sed -i "$mac_sed_flag" "s|^DB_DRIVER=.*|DB_DRIVER=${DB_DRIVER}|"    "$file"
-        sed -i "$mac_sed_flag" "s|^DB_CONNECTION=.*|DB_CONNECTION=pgsql|"   "$file"
-        sed -i "$mac_sed_flag" "s|^DB_HOST=.*|DB_HOST=postgres|"            "$file"
-        sed -i "$mac_sed_flag" "s|^DB_PORT=.*|DB_PORT=5432|"                "$file"
-        rm -f "${file}.bak" 2>/dev/null
-    else
-        sed -i "s|^DB_DRIVER=.*|DB_DRIVER=${DB_DRIVER}|"    "$file"
-        sed -i "s|^DB_CONNECTION=.*|DB_CONNECTION=pgsql|"   "$file"
-        sed -i "s|^DB_HOST=.*|DB_HOST=postgres|"            "$file"
-        sed -i "s|^DB_PORT=.*|DB_PORT=5432|"                "$file"
-    fi
-    print_success "Configured .env for PostgreSQL (${DB_DRIVER})"
+create_laravel_app() {
+    local image="dockerized-laravel-installer:local"
+    command -v docker >/dev/null || { print_error "Docker is required"; exit 1; }
+    print_info "Building the PHP image (first time takes a few minutes)..."
+    docker build --quiet --target local -t "$image" \
+        --build-arg USER_ID=1000 --build-arg GROUP_ID=1000 \
+        -f "${TMP_DIR}/docker/Dockerfile" "${TMP_DIR}" >/dev/null
+    print_info "composer create-project laravel/laravel ${CONTAINER_BASE_NAME}..."
+    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e COMPOSER_HOME=/tmp/composer \
+        -v "$(pwd):/work" -w /work "$image" \
+        composer create-project --prefer-dist --no-interaction laravel/laravel "$CONTAINER_BASE_NAME"
+    docker image rm "$image" >/dev/null 2>&1 || true
+    print_success "Laravel app created in ./${CONTAINER_BASE_NAME}"
 }
 
-cleanup_on_error() {
-    print_error "Installation failed. Cleaning up..."
-    [[ -d "dockerized-laravel" ]] && rm -rf dockerized-laravel
+copy_toolkit() {
+    cp "${TMP_DIR}/dock" "${TARGET_DIR}/dock"
+    chmod +x "${TARGET_DIR}/dock"
+    mkdir -p "${TARGET_DIR}/scripts" "${TARGET_DIR}/docker"
+    cp -R "${TMP_DIR}/scripts/lib" "${TARGET_DIR}/scripts/"
+    cp -R "${TMP_DIR}/docker/." "${TARGET_DIR}/docker/"
+    append_missing_lines "${TMP_DIR}/.dockerignore" "${TARGET_DIR}/.dockerignore"
+    printf '/db-data\n/backups\n' > "${TMP_DIR}/gitignore.add"
+    append_missing_lines "${TMP_DIR}/gitignore.add" "${TARGET_DIR}/.gitignore"
+    print_success "Copied dock, scripts/, docker/ and updated .dockerignore / .gitignore"
 }
 
-install_dockerized_laravel() {
-    trap cleanup_on_error ERR
-    
-    local total_steps=5
-    local current_step=0
-    
-    # Step 1: Clone repository
-    ((current_step++))
-    print_step $current_step $total_steps "Downloading dockerized-laravel"
-    
-    [[ -d "dockerized-laravel" ]] && rm -rf dockerized-laravel
-    
-    if ! git clone --depth 1 "$REPO_URL" dockerized-laravel 2>&1 | grep -v "^$"; then
-        print_error "Failed to clone repository"
-        return 1
-    fi
-    print_success "Repository cloned"
-    
-    cd dockerized-laravel || exit 1
-    
-    # Step 2: Make scripts executable
-    ((current_step++))
-    print_step $current_step $total_steps "Setting up scripts"
-    
-    chmod +x dock scripts/lib/*.sh 2>/dev/null || true
-    print_success "Scripts configured"
-    
-    # Step 3: Update configuration files
-    ((current_step++))
-    print_step $current_step $total_steps "Configuring project"
-    
-    local config_files=(".env" "docker/config/nginx/default.conf" "docker/config/caddy/Caddyfile")
-    for file in "${config_files[@]}"; do
-        if [[ -f "$file" ]]; then
-            update_config_file "$file"
-            print_success "Updated $file"
+configure_env() {
+    local env="${TARGET_DIR}/.env" key line db_password
+    if [[ -f "$env" ]]; then
+        cp "$env" "${env}.backup-$(date +%Y%m%d%H%M%S)"
+        print_info "Existing .env kept (backup: $(basename "$(ls -t "${env}".backup-* | head -n1)"))"
+        # Add the dock section for keys the project doesn't have yet.
+        while IFS= read -r line; do
+            [[ "$line" =~ ^([A-Z_]+)= ]] || continue
+            key="${BASH_REMATCH[1]}"
+            case "$key" in
+                CONTAINER_NAME|SERVER|SERVICES|APP_PORT|BRANCH|DOMAIN|STORAGE_MOUNT_PATH|DB_MOUNT_PATH|DB_DRIVER)
+                    grep -qE "^${key}=" "$env" || printf '%s\n' "$line" >> "$env.dock" ;;
+            esac
+        done < "${TMP_DIR}/.env"
+        if [[ -s "$env.dock" ]]; then
+            printf '\n# Docker (./dock)\n' >> "$env"
+            cat "$env.dock" >> "$env"
         fi
+        rm -f "$env.dock"
+    else
+        cp "${TMP_DIR}/.env" "$env"
+    fi
+
+    db_password="$(get_env_value "$env" DB_PASSWORD)"
+    if [[ -z "$db_password" || "$db_password" == "{{DB_PASSWORD}}" || "$db_password" == "password" ]]; then
+        db_password="$(random_password)"
+    fi
+
+    safe_sed -e "s|{{APP_NAME}}|$(sed_escape "$APP_NAME")|g" \
+             -e "s|{{CONTAINER_NAME}}|$(sed_escape "$CONTAINER_BASE_NAME")|g" \
+             -e "s|{{DB_NAME}}|$(sed_escape "$DB_NAME")|g" "$env"
+    [[ "$APP_TYPE" == "new" ]] && set_env_value "$env" APP_NAME "\"${APP_NAME}\""
+    set_env_value "$env" CONTAINER_NAME "$CONTAINER_BASE_NAME"
+    set_env_value "$env" SERVER "$SERVER"
+    set_env_value "$env" DB_DRIVER "$DB_DRIVER"
+    if [[ "$DB_DRIVER" == "mariadb" ]]; then
+        set_env_value "$env" DB_CONNECTION mysql
+        set_env_value "$env" DB_HOST mariadb
+        set_env_value "$env" DB_PORT 3306
+    else
+        set_env_value "$env" DB_CONNECTION pgsql
+        set_env_value "$env" DB_HOST postgres
+        set_env_value "$env" DB_PORT 5432
+    fi
+    set_env_value "$env" DB_DATABASE "$DB_NAME"
+    [[ -n "$(get_env_value "$env" DB_USERNAME)" && "$(get_env_value "$env" DB_USERNAME)" != "root" ]] \
+        || set_env_value "$env" DB_USERNAME app
+    set_env_value "$env" DB_PASSWORD "\"${db_password}\""
+    chmod 600 "$env"
+    print_success "Configured .env (DB_HOST, DB_* and dock settings; random DB_PASSWORD)"
+}
+
+# Point AI coding agents at docker/AGENTS.md. The note is prepended: Laravel's
+# own AGENTS.md tells agents to install PHP on the host, which we override.
+configure_ai_docs() {
+    local f found=false note
+    note="$(cat <<'EOF'
+<!-- dockerized-laravel -->
+> **Docker project.** PHP, Composer, Node and the database run in containers via `./dock`.
+> Never install or run `php`, `composer`, `npm` or `artisan` on the host: prefix them with `./dock`
+> (e.g. `./dock composer require laravel/boost --dev`, `./dock artisan boost:install`).
+> Full guide: @docker/AGENTS.md
+EOF
+)"
+    for f in AGENTS.md CLAUDE.md; do
+        [[ -f "${TARGET_DIR}/$f" ]] || continue
+        found=true
+        grep -qF "dockerized-laravel -->" "${TARGET_DIR}/$f" && continue
+        { printf '%s\n\n' "$note"; cat "${TARGET_DIR}/$f"; } > "${TARGET_DIR}/$f.tmp"
+        mv "${TARGET_DIR}/$f.tmp" "${TARGET_DIR}/$f"
     done
-    configure_db_settings ".env"
-    
-    # Step 4: Handle project type
-    ((current_step++))
-    if [[ "$APP_TYPE" == "new" ]]; then
-        print_step $current_step $total_steps "Creating new Laravel project"
-
-        # Bootstrap stub: the image must build before the Laravel app exists,
-        # and the Dockerfile anchors its dependency COPY on composer.json.
-        # The real composer.json arrives with `laravel new`; the stub dies
-        # with this clone in the cleanup step.
-        [[ -f composer.json ]] || echo '{}' > composer.json
-
-        ./dock start --build
-        docker exec "$CONTAINER_BASE_NAME" composer global require laravel/installer
-        docker exec -it "$CONTAINER_BASE_NAME" sh -c "~/.composer/vendor/bin/laravel new $CONTAINER_BASE_NAME"
-        
-        # Move new project outside dockerized-laravel folder
-        mv "$CONTAINER_BASE_NAME" ..
-        cd ..
-        
-        # Copy docker and scripts to the new project
-        for dir in dockerized-laravel/docker dockerized-laravel/scripts; do
-            cp -r "$dir" "$CONTAINER_BASE_NAME/"
-        done
-        
-        # Copy dock CLI
-        cp dockerized-laravel/dock "$CONTAINER_BASE_NAME/"
-
-        # Ship .dockerignore. Without it, COPY . . in the builder stage
-        # overlays the host's vendor/ onto the freshly-installed one and
-        # ships stale dependencies (see docker/Dockerfile builder stage).
-        cp dockerized-laravel/.dockerignore "$CONTAINER_BASE_NAME/.dockerignore"
-
-        # Move .env file
-        rm -f "$CONTAINER_BASE_NAME/.env"
-        mv dockerized-laravel/.env "$CONTAINER_BASE_NAME/.env"
-        
-        print_success "Laravel project created"
-    else
-        print_step $current_step $total_steps "Installing in existing project"
-        
-        # Backup existing .env if present
-        if [[ -f "../.env" ]]; then
-            mv "../.env" "../.env.backup"
-            print_info "Backed up existing .env to .env.backup"
-        fi
-
-        # Same for .dockerignore — don't silently overwrite user's rules.
-        # Missing/incomplete .dockerignore is the stale-vendor footgun.
-        if [[ -f "../.dockerignore" ]]; then
-            mv "../.dockerignore" "../.dockerignore.backup"
-            print_info "Backed up existing .dockerignore to .dockerignore.backup"
-        fi
-        cp .dockerignore ../
-
-        # Copy files to parent directory
-        cp .env ../
-        cp dock ../
-        cp -r docker ../
-        cp -r scripts ../
-        cd ..
-        
-        print_success "Docker configuration installed"
+    if [[ "$found" == false ]]; then
+        printf '%s\n' "$note" > "${TARGET_DIR}/AGENTS.md"
+        printf '@AGENTS.md\n' > "${TARGET_DIR}/CLAUDE.md"
     fi
-    
-    # Step 5: Cleanup
-    ((current_step++))
-    print_step $current_step $total_steps "Finalizing"
-    
-    rm -rf dockerized-laravel
-    print_success "Cleanup complete"
-    
-    # Final message
+    print_success "AI agent guide: docker/AGENTS.md (linked from AGENTS.md / CLAUDE.md)"
+}
+
+install() {
+    local total=4 step=1
+    print_step $step $total "Downloading dockerized-laravel"; step=$((step + 1))
+    download_toolkit
+
+    if [[ "$APP_TYPE" == "new" ]]; then
+        print_step $step $total "Creating Laravel app"; step=$((step + 1))
+        create_laravel_app
+    else
+        print_step $step $total "Checking project"; step=$((step + 1))
+        [[ -f "${TARGET_DIR}/artisan" ]] || print_warning "No artisan file here: is this a Laravel project root?"
+        [[ ! -d "${TARGET_DIR}/docker" ]] || print_warning "docker/ exists: matching files will be overwritten (tip: ./dock update next time)"
+    fi
+
+    print_step $step $total "Installing Docker setup"; step=$((step + 1))
+    copy_toolkit
+    configure_env
+    configure_ai_docs
+
+    print_step $step $total "Done"
     echo ""
-    echo -e "${GREEN}╭──────────────────────────────────────────╮${NC}"
-    echo -e "${GREEN}│${NC}  ${BOLD}${ICON_CHECK} Installation Complete!${NC}"
-    echo -e "${GREEN}╰──────────────────────────────────────────╯${NC}"
-    echo ""
-    echo -e "  ${BOLD}Next steps:${NC}"
-    echo -e "  ${DIM}1.${NC} cd ${CONTAINER_BASE_NAME:-$(pwd)}"
-    echo -e "  ${DIM}2.${NC} Review and edit .env file"
-    echo -e "  ${DIM}3.${NC} ./dock start"
-    echo ""
-    echo -e "  ${BOLD}Useful commands:${NC}"
-    echo -e "  ${DIM}${ICON_ARROW}${NC} ./dock --help         Show all commands"
-    echo -e "  ${DIM}${ICON_ARROW}${NC} ./dock start          Start containers"
-    echo -e "  ${DIM}${ICON_ARROW}${NC} ./dock artisan <cmd>  Run artisan command"
-    echo -e "  ${DIM}${ICON_ARROW}${NC} ./dock logs -f        Follow container logs"
+    echo -e "  ${BOLD}Next steps${NC}"
+    [[ "$APP_TYPE" == "new" ]] && echo -e "  ${DIM}\$${NC} cd ${CONTAINER_BASE_NAME}"
+    echo -e "  ${DIM}\$${NC} ./dock start          ${DIM}# build + start + provision${NC}"
+    echo -e "  ${DIM}\$${NC} ./dock help           ${DIM}# all commands${NC}"
+    [[ "$SERVER" == "octane" ]] && echo -e "  ${DIM}laravel/octane is installed automatically on first start${NC}"
     echo ""
 }
 
-# -----------------------------------------------------------------------------
-# Argument Parsing
-# -----------------------------------------------------------------------------
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -t|--type)
-                APP_TYPE="$2"
-                shift 2
-                ;;
-            -n|--name)
-                APP_NAME="$2"
-                shift 2
-                ;;
-            -c|--container)
-                CONTAINER_BASE_NAME="$2"
-                shift 2
-                ;;
-            -r|--repo)
-                REPO_URL_PROJECT="$2"
-                shift 2
-                ;;
-            -d|--database)
-                DB_NAME="$2"
-                shift 2
-                ;;
-            --db-driver)
-                DB_DRIVER="$2"
-                shift 2
-                ;;
-            --non-interactive)
-                NON_INTERACTIVE=true
-                shift
-                ;;
-            -y|--yes)
-                SKIP_CONFIRM=true
-                shift
-                ;;
-            -h|--help)
-                show_help
-                exit 0
-                ;;
-            -V|--version)
-                echo "dockerized-laravel installer v${VERSION}"
-                exit 0
-                ;;
-            *)
-                print_error "Unknown option: $1"
-                echo "Run './configure-app.sh --help' for usage"
-                exit 1
-                ;;
+            -t|--type)        APP_TYPE="${2:-}"; shift 2 ;;
+            -n|--name)        APP_NAME="${2:-}"; shift 2 ;;
+            -c|--container)   CONTAINER_BASE_NAME="${2:-}"; shift 2 ;;
+            -d|--database)    DB_NAME="${2:-}"; shift 2 ;;
+            --db-driver)      DB_DRIVER="${2:-}"; shift 2 ;;
+            --server)         SERVER="${2:-}"; shift 2 ;;
+            -r|--repo)        print_warning "--repo is no longer used (deploys run from the app's own clone)"; shift 2 ;;
+            --non-interactive) NON_INTERACTIVE=true; shift ;;
+            -y|--yes)         SKIP_CONFIRM=true; shift ;;
+            -h|--help)        show_help; exit 0 ;;
+            -V|--version)     echo "dockerized-laravel installer v${VERSION}"; exit 0 ;;
+            *) print_error "Unknown option: $1 (see --help)"; exit 1 ;;
         esac
     done
 }
 
-# -----------------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------------
 main() {
     parse_args "$@"
-    
     print_header
-    
-    if [[ "$NON_INTERACTIVE" == "true" ]]; then
-        # Non-interactive mode: validate all inputs
-        validate_inputs || exit 1
-        DB_NAME="${DB_NAME:-$CONTAINER_BASE_NAME}"
-    else
-        # Interactive mode: prompt for inputs
-        prompt_project_type
+    if [[ "$NON_INTERACTIVE" == false ]]; then
         prompt_inputs
-        prompt_db_driver
     fi
-    
+    [[ -n "$DB_NAME" ]] || DB_NAME="$(echo "$CONTAINER_BASE_NAME" | tr '.-' '__')"
+    validate_inputs || exit 1
+
+    if [[ "$APP_TYPE" == "new" ]]; then
+        TARGET_DIR="$(pwd)/${CONTAINER_BASE_NAME}"
+        if [[ -e "$TARGET_DIR" ]]; then
+            print_error "${TARGET_DIR} already exists"
+            exit 1
+        fi
+    else
+        TARGET_DIR="$(pwd)"
+    fi
+
     print_summary
-    
-    if ! confirm_proceed; then
-        print_info "Installation cancelled"
-        exit 0
-    fi
-    
-    install_dockerized_laravel
+    confirm_proceed || { print_info "Cancelled"; exit 0; }
+    install
 }
 
 main "$@"

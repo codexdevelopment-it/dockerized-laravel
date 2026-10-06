@@ -1,6 +1,5 @@
 # =============================================================================
-# Caddy + PHP-FPM
-# Caddy fronts php-fpm on app:9000 via php_fastcgi. Auto-HTTPS via DOMAIN env.
+# caddy: php-fpm behind Caddy, automatic HTTPS for DOMAIN.
 # =============================================================================
 
 services:
@@ -10,26 +9,30 @@ services:
 
   caddy:
     container_name: '${CONTAINER_NAME}-caddy'
-    image: caddy:alpine
+    image: 'caddy:${CADDY_VERSION:-2-alpine}'
     restart: '${RESTART_POLICY:-no}'
     ports:
       - '${HTTP_PORT:-80}:80'
       - '${HTTPS_PORT:-443}:443'
+      - '${HTTPS_PORT:-443}:443/udp'
     environment:
       - DOMAIN=${DOMAIN:-localhost}
     volumes:
       - '../config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro'
-      - '../../:/var/www/html:ro'
-      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/html/storage:ro'
+      - '../../public:/var/www/html/public:ro'
+      - '${STORAGE_MOUNT_PATH}:/var/www/html/storage:ro'
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
       - app
     networks:
       - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
 
 volumes:
   caddy-data:
-    driver: local
   caddy-config:
-    driver: local

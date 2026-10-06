@@ -1,6 +1,6 @@
 # =============================================================================
 # Docker build context exclusions
-# Keep build context small + prevent host secrets/state from baking into image
+# Keep the build context small and host secrets/state out of the image
 # =============================================================================
 
 # Secrets / config (mounted at runtime instead)
@@ -34,6 +34,7 @@ storage/framework/cache/*
 storage/framework/sessions/*
 storage/framework/views/*
 storage/logs/*
+bootstrap/cache/*.php
 !storage/**/.gitkeep
 
 # Tests / docs
@@ -50,6 +51,10 @@ npm-debug.log
 yarn-error.log
 *.log
 
-# Docker meta (mounted at runtime, no need in image)
-docker/compose
+# Docker toolkit + runtime data (mounted at runtime, never baked in).
+# db-data must stay out: the DB files are unreadable to the build and huge.
+/docker
+/dock
+/db-data
+/backups
 docker-compose*.yml

@@ -1,6 +1,7 @@
 # =============================================================================
-# PostgreSQL — base service definition (no port exposure, bind-mount data dir)
-# Env-specific overrides are in postgres-local.yml / postgres-staging.yml / etc.
+# PostgreSQL: base service (no published port, bind-mounted data dir).
+# Env overrides: postgres-local.yml / -staging.yml / -production.yml.
+# POSTGRES_VERSION is pinned: the data dir is major-locked (major bump = pg_upgrade or dump/restore).
 # =============================================================================
 
 services:
@@ -12,13 +13,19 @@ services:
       POSTGRES_DB: '${DB_DATABASE}'
       POSTGRES_USER: '${DB_USERNAME}'
       POSTGRES_PASSWORD: '${DB_PASSWORD}'
-      TZ: '${APP_TIMEZONE:-Europe/Rome}'
+      TZ: '${APP_TIMEZONE:-UTC}'
     volumes:
-      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/postgresql/data'
+      - '${DB_MOUNT_PATH}:/var/lib/postgresql/data'
     networks:
       - app-network
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-app} -d ${DB_DATABASE:-app}']
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

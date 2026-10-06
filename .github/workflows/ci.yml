@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint (bash -n, shellcheck, compose matrix)
+        run: make lint
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [local, production]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Minimal Laravel-like context
+        if: matrix.target == 'production'
+        run: |
+          mkdir -p /tmp/app/bootstrap/cache && cd /tmp/app
+          echo '{"require":{}}' > composer.json
+          printf '<?php echo "ok";\n' > artisan
+      - name: Build ${{ matrix.target }} image
+        run: |
+          ctx=$([ "${{ matrix.target }}" = production ] && echo /tmp/app || echo .)
+          docker build --target ${{ matrix.target }} -f docker/Dockerfile "$ctx"

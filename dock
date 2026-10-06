@@ -1,64 +1,43 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # dock - Dockerized Laravel CLI
-# =============================================================================
-# Unified command-line interface for managing dockerized Laravel applications.
 #
-# Usage: ./dock <command> [options]
+#   ./dock <command> [options] [arguments]      ./dock help [command]
 #
-# Commands:
-#   start       Start the application containers
-#   stop        Stop all containers
-#   restart     Restart all containers
-#   status      Show container status
-#   logs        View container logs
-#   shell       Open a shell in a container
-#   exec        Execute a command in the app container
-#   artisan     Run Laravel Artisan commands
-#   composer    Run Composer commands
-#   npm         Run NPM commands
-#   tinker      Start Laravel Tinker
-#   migrate     Run database migrations
-#   fresh       Fresh migrate with seed
-#   deploy      Deploy to production
-#   install     Install dockerized-laravel in a project
-#   help        Show help
-#
+# Everything is driven by .env (see README.md). Commands that wrap a tool
+# (artisan, composer, npm, php, exec, ...) pass their arguments through
+# untouched and run as the container's `laravel` user.
 # =============================================================================
 
-# NOTE: no `set -e`. We use explicit `|| return 1` / `|| true` where it matters.
-# `set -e` interacted badly with function-call + AND-OR-list constructs and was
-# causing spurious "Container start failed" errors after a successful start.
+# No `set -e`: it misfires inside functions used in AND-OR lists. Failures are
+# handled explicitly with `|| return 1`.
 
-# Determine script location and project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="3.0.0"
+DOCK_REPO="${DOCK_REPO:-Murkrow02/dockerized-laravel}"
+DOCK_BRANCH="${DOCK_BRANCH:-main}"
 
-# Handle both direct execution and symlink scenarios
-if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
-    PROJECT_ROOT="$SCRIPT_DIR"
-    SCRIPT_LIB_DIR="${SCRIPT_DIR}/scripts/lib"
-elif [[ -d "${SCRIPT_DIR}/lib" ]]; then
-    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-    SCRIPT_LIB_DIR="${SCRIPT_DIR}/lib"
-else
-    # Assume we're in project root
-    PROJECT_ROOT="$SCRIPT_DIR"
-    SCRIPT_LIB_DIR="${SCRIPT_DIR}/scripts/lib"
+# Resolve symlinks so `ln -s /path/to/project/dock ~/bin/dock` works too.
+_self="${BASH_SOURCE[0]}"
+while [[ -L "$_self" ]]; do
+    _target="$(readlink "$_self")"
+    [[ "$_target" == /* ]] && _self="$_target" || _self="$(dirname "$_self")/$_target"
+done
+PROJECT_ROOT="$(cd "$(dirname "$_self")" && pwd)"
+SCRIPT_LIB_DIR="${PROJECT_ROOT}/scripts/lib"
+DOCK_BIN="${PROJECT_ROOT}/dock"
+export PROJECT_ROOT SCRIPT_LIB_DIR
+
+if [[ ! -f "${SCRIPT_LIB_DIR}/docker.sh" ]]; then
+    echo "dock: scripts/lib not found next to ${DOCK_BIN}" >&2
+    exit 1
 fi
-
-export SCRIPT_LIB_DIR
-export PROJECT_ROOT
-
-# Source library files
 source "${SCRIPT_LIB_DIR}/colors.sh"
 source "${SCRIPT_LIB_DIR}/utils.sh"
 source "${SCRIPT_LIB_DIR}/env.sh"
 source "${SCRIPT_LIB_DIR}/checks.sh"
 source "${SCRIPT_LIB_DIR}/docker.sh"
+source "${SCRIPT_LIB_DIR}/ui.sh"
 
-# -----------------------------------------------------------------------------
-# Global Options
-# -----------------------------------------------------------------------------
 VERBOSE=false
 QUIET=false
 DEBUG=false
@@ -66,853 +45,1065 @@ ENV_FILE=".env"
 COMMAND=""
 ARGS=()
 
-# -----------------------------------------------------------------------------
-# Version
-# -----------------------------------------------------------------------------
-VERSION="2.0.0"
+# Commands whose arguments belong to the wrapped tool, never to dock.
+PASSTHROUGH_COMMANDS=" exec artisan a composer npm npx node php tinker test pint format migrate fresh seed "
 
-# -----------------------------------------------------------------------------
-# Help Text
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Help
+# =============================================================================
 show_help() {
-    echo ""
-    echo -e "${BOLD}${ICON_DOCKER} Dockerized Laravel CLI${NC} v${VERSION}"
-    echo ""
-    echo -e "${BOLD}USAGE${NC}"
-    echo "    ./dock <command> [options] [arguments]"
-    echo ""
-    echo -e "${BOLD}COMMANDS${NC}"
-    echo -e "    ${GREEN}start${NC}               Start the application containers"
-    echo -e "    ${GREEN}stop${NC}                Stop all containers"
-    echo -e "    ${GREEN}restart${NC}             Restart all containers"
-    echo -e "    ${GREEN}status${NC}              Show container status"
-    echo -e "    ${GREEN}logs${NC} [service]      View container logs (-f to follow)"
-    echo -e "    ${GREEN}shell${NC} [container]   Open a shell in a container (default: app)"
-    echo -e "    ${GREEN}exec${NC} <cmd>          Execute a command in the app container"
-    echo ""
-    echo -e "    ${CYAN}artisan${NC} <cmd>        Run Laravel Artisan command"
-    echo -e "    ${CYAN}composer${NC} <cmd>       Run Composer command"
-    echo -e "    ${CYAN}npm${NC} <cmd>            Run NPM command"
-    echo -e "    ${CYAN}tinker${NC}               Start Laravel Tinker REPL"
-    echo -e "    ${CYAN}migrate${NC}              Run database migrations"
-    echo -e "    ${CYAN}fresh${NC}                Fresh migrate with seed"
-    echo -e "    ${CYAN}seed${NC}                 Run database seeders"
-    echo ""
-    echo -e "    ${YELLOW}deploy${NC}              Deploy / re-deploy (git pull + build + migrate)"
-    echo -e "    ${YELLOW}install${NC}             Install dockerized-laravel in a project"
-    echo ""
-    echo -e "    ${DIM}help${NC}                Show this help message"
-    echo -e "    ${DIM}version${NC}             Show version"
-    echo ""
-    echo -e "${BOLD}OPTIONS${NC}"
-    echo "    -v, --verbose       Show detailed output"
-    echo "    -q, --quiet         Suppress non-essential output"
-    echo "    -e, --env <file>    Use a specific .env file"
-    echo "    -h, --help          Show help for a command"
-    echo "    --debug             Show debug information"
-    echo ""
-    echo -e "${BOLD}EXAMPLES${NC}"
-    echo "    ./dock start                    # Start containers"
-    echo "    ./dock start --verbose          # Start with detailed output"
-    echo "    ./dock logs -f                  # Follow all logs"
-    echo "    ./dock logs app                 # View app container logs"
-    echo "    ./dock artisan migrate          # Run migrations"
-    echo "    ./dock shell                    # Enter app container shell"
-    echo "    ./dock shell db                 # Enter database container"
-    echo ""
-    echo -e "${BOLD}ENVIRONMENT${NC}"
-    echo "    Configure via .env file:"
-    echo -e "    - ${BLUE}SERVER${NC}      Server type: artisan, octane, fpm, nginx, caddy"
-    echo -e "    - ${BLUE}SERVICES${NC}    Additional services: redis,mailpit,meilisearch"
-    echo -e "    - ${BLUE}APP_ENV${NC}     Environment: local, staging, production"
-    echo ""
+    cat <<EOF
+
+$(echo -e "${BOLD}${ICON_DOCKER} Dockerized Laravel${NC} v${VERSION}")
+
+$(echo -e "${BOLD}USAGE${NC}")
+    ./dock [global options] <command> [arguments]
+
+$(echo -e "${BOLD}LIFECYCLE${NC}")
+    start [--build] [--no-cache]   Start containers (build if needed) and provision the app
+    stop                           Stop and remove containers (data is kept)
+    restart [--build]              Recreate containers (picks up .env changes)
+    build [--no-cache] [--pull]    Build the app image without starting
+    status                         Container states, health and ports
+    logs [service] [-f] [-n N]     Container logs (service: app, db, nginx, redis, ...)
+    shell [service] [--root]       Shell in a container (default: app as laravel)
+    config                         Print the resolved docker compose config
+
+$(echo -e "${BOLD}LARAVEL${NC}") (run in the app container as the laravel user)
+    artisan|a <args>               php artisan ...
+    composer <args>                composer ...
+    npm|npx|node <args>            Node tooling (local env only)
+    php <args>                     php ...
+    exec [--root] <cmd>            Any command
+    tinker                         php artisan tinker
+    test <args>                    php artisan test
+    pint|format <args>             Laravel Pint (code style fixer)
+    migrate <args>                 php artisan migrate
+    fresh <args>                   migrate:fresh --seed (asks outside local)
+    seed <args>                    php artisan db:seed
+
+$(echo -e "${BOLD}DATABASE${NC}")
+    db                             Open the database CLI (mariadb / psql)
+    db:dump [file]                 Dump to backups/<name>-<date>.sql.gz
+    db:restore <file>              Restore a .sql or .sql.gz dump (destructive)
+
+$(echo -e "${BOLD}OPERATIONS${NC}")
+    deploy [-y] [--skip-pull] [--backup]   Pull, build, migrate, cache, reload
+    doctor                         Diagnose configuration and runtime problems
+    update [--check]               Update dock, scripts and compose files from upstream
+    help [command] | version
+
+$(echo -e "${BOLD}GLOBAL OPTIONS${NC}")
+    -v, --verbose      Show what dock runs and full output
+    -q, --quiet        Only errors
+    -y, --yes          Assume yes for confirmations
+    -e, --env <file>   Use another env file (default .env)
+    --debug            Verbose + print compose invocations
+
+$(echo -e "${BOLD}EXAMPLES${NC}")
+    ./dock start                    ./dock artisan make:model Post -m
+    ./dock logs app -f              ./dock composer require laravel/horizon
+    ./dock shell db                 ./dock db:dump && ./dock deploy -y
+EOF
 }
 
 show_command_help() {
-    local cmd="$1"
-
-    case "$cmd" in
-        start)
-            echo ""
-            echo -e "${BOLD}dock start${NC} - Start application containers"
-            echo ""
-            echo -e "${BOLD}USAGE${NC}"
-            echo "    ./dock start [options]"
-            echo ""
-            echo -e "${BOLD}OPTIONS${NC}"
-            echo "    --build         Force rebuild containers"
-            echo "    --no-cache      Build without using cache"
-            echo "    -v, --verbose   Show detailed output"
-            echo "    -q, --quiet     Suppress output"
-            echo ""
-            echo -e "${BOLD}DESCRIPTION${NC}"
-            echo "    Starts all configured containers based on your .env settings."
-            echo "    Automatically handles Octane setup if SERVER=octane."
-            echo ""
-            ;;
-        stop)
-            echo ""
-            echo -e "${BOLD}dock stop${NC} - Stop application containers"
-            echo ""
-            echo -e "${BOLD}USAGE${NC}"
-            echo "    ./dock stop [options]"
-            echo ""
-            echo -e "${BOLD}OPTIONS${NC}"
-            echo "    -v, --verbose   Show detailed output"
-            echo "    -q, --quiet     Suppress output"
-            echo ""
-            echo -e "${BOLD}DESCRIPTION${NC}"
-            echo "    Stops and removes all containers for the current project."
-            echo "    Volumes are preserved by default."
-            echo ""
-            ;;
-        logs)
-            echo ""
-            echo -e "${BOLD}dock logs${NC} - View container logs"
-            echo ""
-            echo -e "${BOLD}USAGE${NC}"
-            echo "    ./dock logs [service] [options]"
-            echo ""
-            echo -e "${BOLD}OPTIONS${NC}"
-            echo "    -f, --follow    Follow log output"
-            echo "    -n, --tail <N>  Number of lines to show (default: 100)"
-            echo ""
-            echo -e "${BOLD}EXAMPLES${NC}"
-            echo "    ./dock logs              # All container logs"
-            echo "    ./dock logs app          # Only app container"
-            echo "    ./dock logs -f           # Follow all logs"
-            echo "    ./dock logs app -f -n 50 # Follow app logs, last 50 lines"
-            echo ""
-            ;;
-        deploy)
-            echo ""
-            echo -e "${BOLD}dock deploy${NC} - Deploy / re-deploy this checkout"
-            echo ""
-            echo -e "${BOLD}USAGE${NC}"
-            echo "    ./dock deploy [options]"
-            echo ""
-            echo -e "${BOLD}OPTIONS${NC}"
-            echo "    -y, --yes        Skip the confirmation prompt"
-            echo "    --skip-pull      Don't fetch/pull from origin (use current checkout as-is)"
-            echo ""
-            echo -e "${BOLD}DESCRIPTION${NC}"
-            echo "    Runs from inside a cloned repo with a populated .env. The script will:"
-            echo "      1. git fetch origin and show the commits being deployed"
-            echo "      2. ask for confirmation"
-            echo "      3. git pull (rebase + autostash)"
-            echo "      4. generate APP_KEY if missing, persist USER_ID/GROUP_ID"
-            echo "      5. build + start containers"
-            echo "      6. run migrations and rebuild caches"
-            echo ""
-            echo -e "${BOLD}FIRST-TIME SETUP${NC}"
-            echo "    1. ssh into the server"
-            echo "    2. git clone <your-app-repo> /var/www/myapp && cd /var/www/myapp"
-            echo "    3. copy/edit .env (set APP_ENV=production, CONTAINER_NAME, DB_*, DOMAIN)"
-            echo "    4. ./dock deploy"
-            echo ""
-            echo -e "${BOLD}RE-DEPLOY${NC}"
-            echo "    cd /var/www/myapp && ./dock deploy"
-            echo ""
-            ;;
-        *)
-            show_help
-            ;;
+    case "$1" in
+        start) cat <<'EOF'
+dock start [--build] [--no-cache]
+    Builds the image when missing, starts every container from .env, then
+    provisions: composer install (local, if vendor/ is missing), storage dirs
+    and permissions, APP_KEY (local), storage:link, optimize:clear (local),
+    laravel/octane install (local, SERVER=octane).
+    --build      Rebuild the app image first (needed after Dockerfile/PHP changes)
+    --no-cache   Rebuild from scratch, pulling fresh base images
+EOF
+        ;;
+        logs) cat <<'EOF'
+dock logs [service] [-f|--follow] [-n|--tail N]
+    service is the compose service: app, mariadb, postgres, nginx, caddy, redis, ...
+    "db" is accepted as an alias for the database service.
+EOF
+        ;;
+        shell|sh) cat <<'EOF'
+dock shell [service] [--root]
+    Opens bash (or sh) in a container. Default: app container as `laravel`.
+    service: db, nginx, redis, ... (container <CONTAINER_NAME>-<service>)
+EOF
+        ;;
+        deploy) cat <<'EOF'
+dock deploy [-y|--yes] [--skip-pull] [--backup]
+    Run on the server, inside a clone of the app repo with a production .env:
+      1. git fetch BRANCH, show incoming commits, confirm
+      2. git pull --ff-only (refuses to run on a diverged checkout)
+      3. USER_ID/GROUP_ID + APP_KEY into .env, storage permissions
+      4. optional DB dump (--backup), build + start containers
+      5. wait for the DB, migrate --force, storage:link, rebuild caches
+      6. reload the app server
+    --skip-pull   Deploy the working tree as-is
+    --backup      db:dump before migrating
+EOF
+        ;;
+        db|db:dump|db:restore) cat <<'EOF'
+dock db                       Interactive mariadb / psql client
+dock db:dump [file]           Gzipped SQL dump. Default: backups/<container>-<db>-<date>.sql.gz
+dock db:restore <file>        Imports a .sql / .sql.gz into DB_DATABASE (asks first)
+EOF
+        ;;
+        update) cat <<'EOF'
+dock update [--check]
+    Downloads the latest dockerized-laravel (DOCK_REPO, DOCK_BRANCH) and
+    replaces dock, scripts/lib, docker/compose, docker/Dockerfile and
+    docker/AGENTS.md. Files in docker/config are only added when missing;
+    changed ones are listed so you can merge them by hand.
+    --check   Only show what would change
+EOF
+        ;;
+        *) show_help ;;
     esac
 }
 
-# -----------------------------------------------------------------------------
-# Command: start
-# -----------------------------------------------------------------------------
-cmd_start() {
-    local build=false
-    local no_cache=false
+# =============================================================================
+# Shared steps
+# =============================================================================
 
-    # Parse command-specific options
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --build)    build=true; shift ;;
-            --no-cache) no_cache=true; shift ;;
-            -h|--help)  show_command_help start; return 0 ;;
-            *)          shift ;;
-        esac
-    done
+env_path() {
+    if [[ "$ENV_FILE" == /* ]]; then echo "$ENV_FILE"; else echo "${PROJECT_ROOT}/${ENV_FILE}"; fi
+}
 
-    print_header "Dockerized Laravel"
+# load + validate .env. require_env [start|deploy]
+require_env() {
+    load_env "$(env_path)" || return 1
+    validate_full_env "${1:-start}" || return 1
+    prepare_compose_env
+}
 
-    # Load and validate environment
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    validate_full_env "start" || return 1
-
-    # Run pre-flight checks
-    run_preflight_checks "start" "$PROJECT_ROOT" || return 1
-
-    # Print configuration
-    print_env_summary
-
-    # Start containers
-    print_section "${ICON_PACKAGE} Starting Containers"
-
-    # Always stream docker output — builds can take minutes and a silent
-    # spinner looks frozen. -q suppresses dock's own chatter, not docker's.
-    local exit_code=0
-    print_info "Starting containers..."
-    docker_up "$build" || exit_code=$?
-
-    if [[ $exit_code -ne 0 ]]; then
-        print_error "Failed to start containers"
+# Light variant for commands that only talk to running containers.
+require_env_light() {
+    load_env "$(env_path)" || return 1
+    if [[ -z "${CONTAINER_NAME:-}" ]]; then
+        print_error "CONTAINER_NAME is not set in $(env_path)"
         return 1
     fi
-
-    print_success "Containers started"
-
-    # Give containers a moment to initialize
-    sleep 2
-
-    # Print status (ignore errors - containers might not be labeled yet)
-    print_container_status || true
-
-    # Octane setup only when actually using Octane.
-    # nginx/caddy talk FastCGI to php-fpm on app:9000 - no octane needed.
-    if [[ "${SERVER:-artisan}" == "octane" ]]; then
-        setup_octane || true
-    fi
-
-    # Standard provisioning
-    provision_app || true
-
-    # Handle artisan serve mode (interactive)
-    if [[ "${SERVER:-artisan}" == "artisan" ]]; then
-        print_ready "http://localhost:${APP_PORT:-8000}"
-        print_info "Starting artisan serve (Ctrl+C to stop)..."
-        docker exec -it "${CONTAINER_NAME}" php artisan serve --host=0.0.0.0 --port=80
-    else
-        print_ready "http://localhost:${APP_PORT:-8000}"
-    fi
-
-    return 0
 }
 
-# Setup Octane server.
-# All steps are best-effort: a failure here must NOT kill the deploy if the
-# containers are otherwise running. Add laravel/octane to composer.json of the
-# app to avoid the runtime install path entirely.
-setup_octane() {
-    print_verbose "Setting up Octane..."
-
-    if ! check_octane_installed; then
-        print_warning "laravel/octane not found in image - installing at runtime (slow + lost on rebuild)"
-        print_info "Fix: add 'laravel/octane' to composer.json and redeploy"
-        docker exec "${CONTAINER_NAME}" composer require laravel/octane 2>/dev/null || true
-        docker exec "${CONTAINER_NAME}" php artisan octane:install --server=frankenphp -q 2>/dev/null || true
-    fi
-
-    print_verbose "Linking FrankenPHP binary..."
-    docker exec "${CONTAINER_NAME}" mkdir -p vendor/laravel/octane/bin 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-x86_64 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" ln -sf /usr/local/bin/frankenphp vendor/laravel/octane/bin/frankenphp-linux-aarch64 2>/dev/null || true
-
-    docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/00-base.conf restart octane 2>/dev/null || true
-    return 0
-}
-
-# Provision the application.
-# Runs `docker exec` steps that may legitimately fail (missing artisan, perms);
-# always returns 0 so callers don't blow up. In verbose mode, errors print.
-provision_app() {
-    print_verbose "Provisioning application..."
-
-    # Helper: run docker exec and report failures only in verbose mode
-    _provision_run() {
-        local label="$1"; shift
-        if [[ "${VERBOSE:-false}" == "true" ]]; then
-            docker exec "${CONTAINER_NAME}" "$@" || \
-                print_warning "  ${label} returned non-zero (continuing)"
-        else
-            docker exec "${CONTAINER_NAME}" "$@" >/dev/null 2>&1 || true
-        fi
-    }
-
-    # Guard: vendor/autoload.php must exist before any artisan command can run.
-    # In local, the project is volume-mounted so vendor/ may be absent on a fresh
-    # clone — install it automatically. In production/staging, a missing vendor/
-    # means the image was built incorrectly: fail loudly rather than silently.
-    if ! docker exec "${CONTAINER_NAME}" test -f vendor/autoload.php 2>/dev/null; then
-        if is_local_env; then
-            print_warning "vendor/autoload.php not found — running composer install..."
-            docker exec "${CONTAINER_NAME}" composer install --no-scripts --prefer-dist \
-                || { print_error "composer install failed — cannot provision"; return 1; }
-            print_success "composer install completed"
-        else
-            print_error "vendor/autoload.php not found in container."
-            print_error "The Docker image appears to be missing its Composer dependencies."
-            print_error "Rebuild the image with: docker build --no-cache ..."
-            return 1
-        fi
-    fi
-
-    # Storage scaffolding (in case the image was built without these dirs).
-    _provision_run "mkdir storage" sh -c 'mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/app/public storage/logs bootstrap/cache'
-    _provision_run "chmod storage" sh -c 'chmod -R 775 storage bootstrap/cache 2>/dev/null'
-    _provision_run "chown storage" sh -c 'chown -R laravel:www-data storage bootstrap/cache 2>/dev/null'
-    _provision_run "setfacl storage" setfacl -R -d -m u::rwX,g::rwX,o::rX storage/app/public/
-    _provision_run "setfacl public" setfacl -R -d -m u::rwX,g::rwX,o::rX public/
-
-    # Generate key only in local (.env is writable). Prod handles this in deploy.
-    if is_local_env && [[ -z "${APP_KEY:-}" ]]; then
-        print_verbose "Generating application key..."
-        _provision_run "key:generate" php artisan key:generate
-    fi
-
-    _provision_run "storage:link" php artisan storage:link --force
-
-    if is_local_env; then
-        print_verbose "Clearing caches for local development..."
-        _provision_run "optimize:clear" php artisan optimize:clear
-    fi
-
-    return 0
-}
-
-# -----------------------------------------------------------------------------
-# Command: stop
-# -----------------------------------------------------------------------------
-cmd_stop() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -h|--help) show_command_help stop; return 0 ;;
-            *) shift ;;
-        esac
-    done
-
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-
-    print_info "Stopping containers..."
-    docker_down || true
-    print_success "Containers stopped"
-}
-
-# -----------------------------------------------------------------------------
-# Command: restart
-# -----------------------------------------------------------------------------
-cmd_restart() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-
-    print_info "Restarting containers..."
-    docker_restart || true
-    print_success "Containers restarted"
-}
-
-# -----------------------------------------------------------------------------
-# Command: status
-# -----------------------------------------------------------------------------
-cmd_status() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-
-    print_header "Container Status"
-    print_container_status
-
-    print_nl
-    print_section "${ICON_INFO} Details"
-    docker_status
-}
-
-# -----------------------------------------------------------------------------
-# Command: logs
-# -----------------------------------------------------------------------------
-cmd_logs() {
-    local service=""
-    local follow=false
-    local tail=100
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -f|--follow) follow=true; shift ;;
-            -n|--tail)   tail="$2"; shift 2 ;;
-            -h|--help)   show_command_help logs; return 0 ;;
-            -*)          shift ;;
-            *)           service="$1"; shift ;;
-        esac
-    done
-
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker_logs "$service" "$follow" "$tail"
-}
-
-# -----------------------------------------------------------------------------
-# Command: shell
-# -----------------------------------------------------------------------------
-cmd_shell() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-
-    local container="${1:-${CONTAINER_NAME}}"
-
-    # Handle container name shortcuts
-    if [[ -n "$1" ]] && [[ "$1" != "${CONTAINER_NAME}" ]] && [[ "$1" != "${CONTAINER_NAME}-"* ]]; then
-        container="${CONTAINER_NAME}-${1}"
-    fi
-
-    print_info "Opening shell in ${container}..."
-    docker exec -it "$container" bash || docker exec -it "$container" sh
-}
-
-# -----------------------------------------------------------------------------
-# Command: exec
-# -----------------------------------------------------------------------------
-cmd_exec() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker_exec "${CONTAINER_NAME}" "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: artisan
-# -----------------------------------------------------------------------------
-cmd_artisan() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker exec -it "${CONTAINER_NAME}" php artisan "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: composer
-# -----------------------------------------------------------------------------
-cmd_composer() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker exec -it "${CONTAINER_NAME}" composer "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: npm
-# -----------------------------------------------------------------------------
-cmd_npm() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker exec -it "${CONTAINER_NAME}" npm "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: tinker
-# -----------------------------------------------------------------------------
-cmd_tinker() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker exec -it "${CONTAINER_NAME}" php artisan tinker
-}
-
-# -----------------------------------------------------------------------------
-# Command: migrate
-# -----------------------------------------------------------------------------
-cmd_migrate() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker exec -it "${CONTAINER_NAME}" php artisan migrate "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: fresh
-# -----------------------------------------------------------------------------
-cmd_fresh() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-
-    if ! is_local_env; then
-        print_warning "Running migrate:fresh in ${APP_ENV} environment!"
-        confirm "This will DELETE ALL DATA. Are you sure?" || return 1
-    fi
-
-    docker exec -it "${CONTAINER_NAME}" php artisan migrate:fresh --seed "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: seed
-# -----------------------------------------------------------------------------
-cmd_seed() {
-    load_env "${PROJECT_ROOT}/${ENV_FILE}" || return 1
-    docker exec -it "${CONTAINER_NAME}" php artisan db:seed "$@"
-}
-
-# -----------------------------------------------------------------------------
-# Command: deploy
-# -----------------------------------------------------------------------------
-cmd_deploy() {
-    local skip_confirm=false
-    local skip_pull=false
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -y|--yes)     skip_confirm=true; shift ;;
-            --skip-pull)  skip_pull=true; shift ;;
-            -h|--help)    show_command_help deploy; return 0 ;;
-            *)            shift ;;
-        esac
-    done
-
-    print_header "Deployment"
-
-    # Must run from inside a cloned repo with a .env present
-    if [[ ! -d "${PROJECT_ROOT}/.git" ]]; then
-        print_error "Not a git repository: ${PROJECT_ROOT}"
-        print_info "First-time setup: clone your app repo to the server, then run this from inside it."
-        return 1
-    fi
-    if [[ ! -f "${PROJECT_ROOT}/.env" ]]; then
-        print_error ".env not found in ${PROJECT_ROOT}"
-        print_info "Copy your production .env into this directory before deploying."
-        return 1
-    fi
-
-    load_env "${PROJECT_ROOT}/.env" || return 1
-    validate_full_env "deploy" || return 1
-
-    cd "$PROJECT_ROOT" || return 1
-
-    if [[ "${APP_ENV:-local}" == "local" ]]; then
-        print_warning "APP_ENV=local — deploy is intended for staging/production."
-        confirm "Continue anyway?" || return 1
-    fi
-
-    # Refuse running deploy from paths we shouldn't touch
-    case "${PROJECT_ROOT}" in
-        "/"|"/root"|"/etc"|"/usr"|"/var"|"/bin"|"/sbin"|"/boot")
-            print_error "Refusing to deploy from unsafe path: '${PROJECT_ROOT}'"
-            return 1
-            ;;
+# Container behind a service shortcut: app, db, or <CONTAINER_NAME>-<name>.
+container_for() {
+    case "${1:-app}" in
+        app|"$CONTAINER_NAME") echo "$CONTAINER_NAME" ;;
+        "$CONTAINER_NAME"-*)   echo "$1" ;;
+        *)                     echo "${CONTAINER_NAME}-$1" ;;
     esac
+}
 
-    # ---- Fetch + summary ----------------------------------------------------
-    local branch="${BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
-    local current_sha new_sha
-    current_sha=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# ./storage for paths inside the project, absolute otherwise.
+short_path() {
+    case "$1" in
+        "${PROJECT_ROOT}"/*) echo "./${1#"${PROJECT_ROOT}"/}" ;;
+        *) echo "$1" ;;
+    esac
+}
 
-    if [[ "$skip_pull" != "true" ]]; then
-        print_info "Fetching origin..."
-        if ! git fetch --tags origin "$branch" 2>&1 | grep -v "^$" >&2; then
-            print_error "git fetch failed (check SSH key / token for the repo)"
-            return 1
-        fi
-        new_sha=$(git rev-parse --short "origin/${branch}" 2>/dev/null || echo "$current_sha")
+# Warn when the image's laravel UID differs from USER_ID (bind-mount writes
+# would fail on Linux). Fixed by rebuilding.
+check_uid_match() {
+    local uid
+    uid="$(app_run id -u 2>/dev/null)" || return 0
+    if [[ -n "$uid" && "$uid" != "$USER_ID" ]]; then
+        print_warning "Image user UID ${uid} != USER_ID ${USER_ID}. Rebuild once: ./dock start --build"
+    fi
+}
+
+# --- start pipeline ----------------------------------------------------------
+# Which optional steps start_stack will run, decided up front so steps can be
+# numbered [n/N]. Locally vendor/ lives on the host, so it can be checked
+# before the containers exist.
+_needs_build()    { [[ "$1" == "true" || "$2" == "true" ]] || ! app_image_exists; }
+_needs_composer() { is_local_env && [[ -f "${PROJECT_ROOT}/composer.json" && ! -f "${PROJECT_ROOT}/vendor/autoload.php" ]]; }
+_needs_octane()   { is_local_env && [[ "${SERVER:-}" == "octane" && -f "${PROJECT_ROOT}/composer.json" && ! -d "${PROJECT_ROOT}/vendor/laravel/octane" ]]; }
+
+# start_stack_steps <build> <no_cache>: number of steps start_stack will print.
+start_stack_steps() {
+    local n=2
+    _needs_build "$1" "$2" && n=$((n + 1))
+    _needs_composer && n=$((n + 1))
+    _needs_octane && n=$((n + 1))
+    echo "$n"
+}
+
+_build_image() {
+    if [[ "$1" == "true" ]]; then
+        compose build --pull --no-cache app
     else
-        new_sha="$current_sha"
+        compose build app
     fi
+}
 
-    if [[ -n "$(git status --porcelain 2>/dev/null | grep -v '^?? ')" ]]; then
-        print_warning "Uncommitted local changes detected. Pull will use --autostash."
-    fi
-
-    print_section "${ICON_GEAR} Configuration"
-    print_kv "App"          "${APP_NAME:-${CONTAINER_NAME}}"
-    print_kv "Environment"  "${APP_ENV}"
-    print_kv "Server"       "${SERVER:-octane}"
-    print_kv "Branch"       "${branch}"
-    print_kv "Domain"       "${DOMAIN:-localhost}"
-    print_kv "Deploy path"  "${PROJECT_ROOT}"
-    print_kv "Storage path" "${STORAGE_MOUNT_PATH:-${PROJECT_ROOT}/storage}"
-    print_kv "DB data path" "${DB_MOUNT_PATH:-${PROJECT_ROOT}/db-data}"
-
-    print_section "${ICON_PACKAGE} Changes"
-    if [[ "$current_sha" == "$new_sha" ]]; then
-        print_info "Already at ${current_sha} — no new commits."
-        print_info "(re-deploy will still rebuild image and rerun migrations)"
-    else
-        print_kv "From" "$current_sha"
-        print_kv "To"   "$new_sha"
-        local commit_count
-        commit_count=$(git rev-list --count "${current_sha}..${new_sha}" 2>/dev/null || echo "?")
-        print_kv "Commits" "${commit_count}"
-        echo ""
-        git log --no-merges --pretty="  %C(yellow)%h%C(reset) %s %C(dim)(%an)%C(reset)" \
-            "${current_sha}..${new_sha}" 2>/dev/null | head -15 || true
-        if [[ "$commit_count" =~ ^[0-9]+$ ]] && (( commit_count > 15 )); then
-            echo -e "  ${DIM}... and $((commit_count - 15)) more${NC}"
-        fi
-        echo ""
-        local file_count
-        file_count=$(git diff --name-only "${current_sha}..${new_sha}" 2>/dev/null | wc -l | tr -d ' ')
-        print_kv "Files changed" "${file_count}"
-    fi
-
-    print_nl
-    if [[ "$skip_confirm" != "true" ]]; then
-        confirm "Proceed with deployment?" || return 1
-    fi
-
-    # ---- Pull ---------------------------------------------------------------
-    print_section "${ICON_PACKAGE} Deploying"
-
-    if [[ "$skip_pull" != "true" && "$current_sha" != "$new_sha" ]]; then
-        print_info "Pulling ${branch}..."
-        git pull --rebase --autostash origin "$branch" 2>&1 | grep -v "^$" || true
-        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-            print_error "git pull failed - resolve conflicts and re-run"
-            return 1
-        fi
-        print_success "Pulled to $(git rev-parse --short HEAD)"
-    fi
-
-    # ---- Ensure mount paths + UID/GID ---------------------------------------
-    # Container must never run as UID 0. If host user is root (e.g. deploy on a
-    # bare VPS with no separate deploy user), fall back to 1000:1000 and chown
-    # storage to that UID so the container can write to it.
-    local host_uid="${USER_ID:-$(id -u)}"
-    local host_gid="${GROUP_ID:-$(id -g)}"
-    if [[ "$host_uid" == "0" ]]; then
-        print_warning "Running as root - using UID/GID 1000 for the container user"
-        print_info "    (run deploy as a non-root user to map host = container UID)"
-        host_uid=1000
-        host_gid=1000
-    fi
-    local storage_path="${STORAGE_MOUNT_PATH:-${PROJECT_ROOT}/storage}"
-    local db_path="${DB_MOUNT_PATH:-${PROJECT_ROOT}/db-data}"
-
-    mkdir -p "$storage_path" "$db_path"
-
-    # Write/replace USER_ID and GROUP_ID in .env so rebuilds match this run
-    if grep -qE '^USER_ID=' "${PROJECT_ROOT}/.env"; then
-        if [[ "$(uname)" == "Darwin" ]]; then
-            sed -i '' "s|^USER_ID=.*|USER_ID=${host_uid}|" "${PROJECT_ROOT}/.env"
-        else
-            sed -i "s|^USER_ID=.*|USER_ID=${host_uid}|" "${PROJECT_ROOT}/.env"
-        fi
-    else
-        echo "USER_ID=${host_uid}" >> "${PROJECT_ROOT}/.env"
-    fi
-    if grep -qE '^GROUP_ID=' "${PROJECT_ROOT}/.env"; then
-        if [[ "$(uname)" == "Darwin" ]]; then
-            sed -i '' "s|^GROUP_ID=.*|GROUP_ID=${host_gid}|" "${PROJECT_ROOT}/.env"
-        else
-            sed -i "s|^GROUP_ID=.*|GROUP_ID=${host_gid}|" "${PROJECT_ROOT}/.env"
-        fi
-    else
-        echo "GROUP_ID=${host_gid}" >> "${PROJECT_ROOT}/.env"
-    fi
-
-    # ---- APP_KEY ------------------------------------------------------------
-    local current_key
-    current_key=$(grep -E '^APP_KEY=' "${PROJECT_ROOT}/.env" | head -n1 | cut -d= -f2- | tr -d '"' || true)
-    if [[ -z "$current_key" || "$current_key" == "base64:" ]]; then
-        print_info "Generating APP_KEY..."
-        local new_key="base64:$(openssl rand -base64 32)"
-        if grep -qE '^APP_KEY=' "${PROJECT_ROOT}/.env"; then
-            if [[ "$(uname)" == "Darwin" ]]; then
-                sed -i '' "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${PROJECT_ROOT}/.env"
-            else
-                sed -i "s|^APP_KEY=.*|APP_KEY=${new_key}|" "${PROJECT_ROOT}/.env"
-            fi
-        else
-            echo "APP_KEY=${new_key}" >> "${PROJECT_ROOT}/.env"
-        fi
-        print_success "APP_KEY set"
-    fi
-
-    # ---- Perms --------------------------------------------------------------
-    chmod +x "${PROJECT_ROOT}/dock" 2>/dev/null || true
-    find "${PROJECT_ROOT}/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
-    chmod 600 "${PROJECT_ROOT}/.env"
-
-    # Storage must be writable by the app container (laravel UID/GID).
-    # DB data dir is NOT touched - the mariadb image's entrypoint manages its
-    # own ownership (mysql user inside the container, usually UID 999).
-    if chown -R "${host_uid}:${host_gid}" "$storage_path" 2>/dev/null; then
-        chmod -R 775 "$storage_path" 2>/dev/null || true
-    else
-        print_warning "chown of storage skipped (owned by another user)."
-        print_info "    If the app fails with 'Permission denied' on storage, run once:"
-        print_info "    sudo chown -R ${host_uid}:${host_gid} ${storage_path}"
-    fi
-
-    # Make sure db data dir exists but DON'T chown it - that's mariadb's job.
-    mkdir -p "$db_path" 2>/dev/null || true
-
-    # ---- Build + start ------------------------------------------------------
-    local dock_args=("--build")
-    [[ "$VERBOSE" == "true" ]] && dock_args+=("--verbose")
-    [[ "$QUIET" == "true" ]] && dock_args+=("--quiet")
-    [[ "$DEBUG" == "true" ]] && dock_args+=("--debug")
-
-    print_info "Building and starting containers..."
-    "${PROJECT_ROOT}/dock" start "${dock_args[@]}" || { print_error "Container start failed"; return 1; }
-
-    # ---- Sync built frontend assets to host ---------------------------------
-    # nginx serves static files from the host bind-mount (../../ -> /var/www/html
-    # in servers/nginx.yml), but `public/build` is gitignored, so `git pull`
-    # never delivers the Vite output. The assets ARE built inside the app image
-    # (Dockerfile `npm run build`), so copy them out of the running container
-    # onto the host path nginx reads. Skipped in local (Vite dev server serves
-    # assets there, and the whole project is already mounted).
-    if [[ "${APP_ENV:-local}" != "local" ]]; then
-        if docker exec "${CONTAINER_NAME}" test -d /var/www/html/public/build 2>/dev/null; then
-            print_info "Syncing built assets to host (public/build)..."
-            rm -rf "${PROJECT_ROOT}/public/build"
-            if docker cp "${CONTAINER_NAME}:/var/www/html/public/build/." \
-                "${PROJECT_ROOT}/public/build" 2>/dev/null; then
-                print_success "Assets synced"
-            else
-                print_warning "Asset sync failed - CSS/JS may 404 until resolved"
-            fi
-        else
-            print_warning "No public/build in container - skipping asset sync"
-        fi
-    fi
-
-    # ---- Post-deploy --------------------------------------------------------
-    print_section "${ICON_GEAR} Post-deploy"
-
-    print_info "Waiting for database..."
-    local db_driver="${DB_DRIVER:-mariadb}"
-    local db_container="${CONTAINER_NAME}-db"
-    local db_check=()
-    if [[ "$db_driver" == "postgres" || "$db_driver" == "postgresql" || "$db_driver" == "pgvector" ]]; then
-        db_check=(pg_isready -U "${DB_USERNAME:-app}" -d "${DB_DATABASE:-app}")
-    else
-        db_check=(healthcheck.sh --connect)
-    fi
+_start_containers() {
     local waited=0
-    while ! docker exec "${db_container}" "${db_check[@]}" &>/dev/null; do
+    compose up -d --remove-orphans || return 1
+    until is_container_running "$CONTAINER_NAME"; do
         waited=$((waited + 1))
-        if (( waited > 60 )); then
-            print_error "Database did not become ready in 60s"
+        if (( waited > 30 )); then
+            echo "App container is not running. Last logs:"
+            docker logs --tail 30 "$CONTAINER_NAME" 2>&1
             return 1
         fi
         sleep 1
     done
-    print_success "Database ready"
-
-    print_info "Running migrations..."
-    docker exec "${CONTAINER_NAME}" php artisan migrate --force || \
-        print_warning "Migration failed - check logs"
-
-    print_info "Storage link..."
-    docker exec "${CONTAINER_NAME}" php artisan storage:link --force 2>/dev/null || true
-
-    print_info "Rebuilding caches..."
-    docker exec "${CONTAINER_NAME}" php artisan config:cache 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" php artisan route:cache 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" php artisan view:cache 2>/dev/null || true
-    docker exec "${CONTAINER_NAME}" php artisan event:cache 2>/dev/null || true
-    # Filament caches components/icons here (moved out of the image build, which
-    # has no .env) so it runs against the real runtime config.
-    if docker exec "${CONTAINER_NAME}" php artisan list 2>/dev/null | grep -q "filament:optimize"; then
-        docker exec "${CONTAINER_NAME}" php artisan filament:optimize 2>/dev/null || true
-    fi
-
-    # Reload the app server so it picks up the freshly rebuilt caches.
-    # php-fpm runs with opcache.validate_timestamps=Off, so it never re-reads
-    # bootstrap/cache/*.php after first compile. Without a reload it keeps
-    # serving the build-baked route cache (whose Livewire /livewire-<hash>/
-    # prefix is derived from the OLD APP_KEY) and every Livewire asset 404s.
-    if [[ "${SERVER:-artisan}" == "octane" ]]; then
-        docker exec "${CONTAINER_NAME}" php artisan octane:reload 2>/dev/null || true
-    else
-        docker exec "${CONTAINER_NAME}" supervisorctl -c /etc/supervisor/conf.d/00-base.conf restart php-fpm 2>/dev/null || true
-    fi
-
-    print_success "Deployment complete!"
-    print_ready "http://${DOMAIN:-localhost}:${APP_PORT:-8000}"
 }
 
-# -----------------------------------------------------------------------------
-# Command: install
-# -----------------------------------------------------------------------------
-cmd_install() {
-    print_header "Install Dockerized Laravel"
-
-    # Source the configure script functionality
-    if [[ -f "${PROJECT_ROOT}/configure-app.sh" ]]; then
-        bash "${PROJECT_ROOT}/configure-app.sh"
-    else
-        print_error "Installation script not found"
-        return 1
-    fi
+_install_octane() {
+    app_run composer require laravel/octane \
+        && app_run php artisan octane:install --server=frankenphp --no-interaction
 }
 
-# -----------------------------------------------------------------------------
-# Main Argument Parsing
-# -----------------------------------------------------------------------------
-parse_args() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -v|--verbose)
-                VERBOSE=true
-                shift
-                ;;
-            -q|--quiet)
-                QUIET=true
-                shift
-                ;;
-            --debug)
-                DEBUG=true
-                VERBOSE=true
-                shift
-                ;;
-            -e|--env)
-                ENV_FILE="$2"
-                shift 2
-                ;;
-            -h|--help)
-                if [[ -n "$COMMAND" ]]; then
-                    show_command_help "$COMMAND"
-                else
-                    show_help
-                fi
-                exit 0
-                ;;
-            -V|--version|version)
-                echo "dock v${VERSION}"
-                exit 0
-                ;;
-            -*)
-                # Unknown option, pass to command
-                ARGS+=("$1")
-                shift
-                ;;
-            *)
-                if [[ -z "$COMMAND" ]]; then
-                    COMMAND="$1"
-                else
-                    ARGS+=("$1")
-                fi
-                shift
-                ;;
+# Best-effort app setup. Fails only when the image is unusable.
+_prepare_app() {
+    if ! app_run test -f vendor/autoload.php; then
+        if is_local_env; then
+            print_warning "No vendor/: run ./dock composer install"
+        else
+            print_error "vendor/autoload.php missing from the image. Rebuild: ./dock build --no-cache"
+            return 1
+        fi
+    fi
+
+    app_try "storage dirs" --root sh -c 'mkdir -p storage/app/public storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache && chown -R laravel:www-data storage bootstrap/cache && chmod -R ug+rwX storage bootstrap/cache'
+
+    if is_local_env && [[ -z "$(get_env_value "$(env_path)" APP_KEY)" ]]; then
+        app_try "key:generate" php artisan key:generate --force
+        print_warning "Generated a new APP_KEY in .env"
+    fi
+    app_try "storage:link" php artisan storage:link --force
+    is_local_env && app_try "optimize:clear" php artisan optimize:clear
+
+    if [[ "${SERVER:-}" == "octane" ]] && ! app_run test -d vendor/laravel/octane; then
+        print_error "SERVER=octane but laravel/octane is missing: ./dock composer require laravel/octane"
+    fi
+
+    # Programs that crashed while vendor/ was missing are FATAL by now.
+    supervisorctl_app start all >/dev/null 2>&1
+    return 0
+}
+
+# start_stack <build> <no_cache>: build if needed, up, install, provision.
+# Caller sets the step counter (steps_begin).
+start_stack() {
+    local build="$1" no_cache="$2"
+
+    if _needs_build "$build" "$no_cache"; then
+        run_step "Building image $(app_image)" _build_image "$no_cache" || return 1
+    fi
+    run_step "Starting containers" _start_containers || return 1
+    check_uid_match
+    if _needs_composer; then
+        run_step "Installing Composer dependencies" app_run composer install --prefer-dist --no-interaction || return 1
+    fi
+    if _needs_octane; then
+        run_step "Installing Laravel Octane" _install_octane \
+            || print_warning "Octane install failed: ./dock composer require laravel/octane"
+    fi
+    run_step "Preparing app" _prepare_app
+}
+
+# Links shown in the final box.
+service_links() {
+    local s
+    echo "App|$(app_url)"
+    for s in $(parse_services); do
+        case "$s" in
+            mailpit)     echo "Mailpit|http://localhost:${MAILPIT_UI_PORT:-8025}" ;;
+            phpmyadmin)  echo "phpMyAdmin|http://localhost:${PHPMYADMIN_PORT:-8080}" ;;
+            meilisearch) echo "Meilisearch|http://localhost:${MEILISEARCH_PORT:-7700}" ;;
         esac
     done
 }
 
-# -----------------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------------
-main() {
-    parse_args "$@"
+# print_done_box <title> <seconds> [color]
+print_done_box() {
+    local title="$1" seconds="$2" color="${3:-$GREEN}" lines=() link
+    lines+=("${color}${BOLD}${CHECKMARK} ${title}${NC} ${DIM}in $(fmt_duration "$seconds")${NC}")
+    lines+=("")
+    while IFS='|' read -r name link; do
+        lines+=("$(printf "${GRAY}%-12s${NC} %s" "$name" "$link")")
+    done < <(service_links)
+    print_box "$color" "${lines[@]}"
+}
 
-    # Export globals for library functions
-    export VERBOSE QUIET DEBUG
+# wait_for_db [timeout]: until the DB container's healthcheck says healthy.
+wait_for_db() {
+    local timeout="${1:-90}" waited=0 status
+    while :; do
+        status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER_NAME}-db" 2>/dev/null)"
+        echo "database: ${status:-missing}"
+        [[ "$status" == "healthy" ]] && return 0
+        if (( waited >= timeout )); then
+            echo "Database not healthy after ${timeout}s. See: ./dock logs db"
+            return 1
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
 
-    # Default to help if no command
-    if [[ -z "$COMMAND" ]]; then
-        show_help
-        exit 0
+# =============================================================================
+# Lifecycle commands
+# =============================================================================
+
+cmd_start() {
+    local build=false no_cache=false started=$SECONDS
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --build)    build=true ;;
+            --no-cache) no_cache=true ;;
+            -h|--help)  show_command_help start; return 0 ;;
+            *)          print_error "Unknown option for start: $1"; return 1 ;;
+        esac
+        shift
+    done
+
+    require_env start || return 1
+    print_header "${APP_NAME:-$CONTAINER_NAME}"
+    print_env_summary
+    run_preflight_checks || return 1
+    print_nl
+
+    ui_cursor_hide
+    steps_begin "$(start_stack_steps "$build" "$no_cache")"
+    start_stack "$build" "$no_cache" || return 1
+    ui_cursor_show
+
+    print_container_status
+    print_done_box "Ready" $((SECONDS - started))
+}
+
+cmd_stop() {
+    require_env_light || return 1
+    steps_begin 0
+    run_step "Stopping ${CONTAINER_NAME}" compose down --remove-orphans
+}
+
+cmd_restart() {
+    local build=false started=$SECONDS
+    [[ "${1:-}" == "--build" ]] && build=true
+    require_env start || return 1
+    print_header "${APP_NAME:-$CONTAINER_NAME}"
+    print_env_summary
+    print_nl
+    ui_cursor_hide
+    steps_begin $(( $(start_stack_steps "$build" false) + 1 ))
+    run_step "Stopping containers" compose down --remove-orphans || return 1
+    start_stack "$build" false || return 1
+    ui_cursor_show
+    print_container_status
+    print_done_box "Restarted" $((SECONDS - started))
+}
+
+cmd_build() {
+    local no_cache=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-cache|--pull) no_cache=true ;;
+            *) print_error "Unknown option for build: $1"; return 1 ;;
+        esac
+        shift
+    done
+    require_env start || return 1
+    check_docker || return 1
+    steps_begin 0
+    run_step "Building image $(app_image)" _build_image "$no_cache"
+}
+
+cmd_status() {
+    require_env_light || return 1
+    prepare_compose_env
+    print_header "${APP_NAME:-$CONTAINER_NAME}"
+    print_env_summary
+    print_container_status || return 0
+    if is_container_running "$CONTAINER_NAME"; then
+        print_nl
+        local name link
+        while IFS='|' read -r name link; do
+            print_kv "$name" "$link" 12
+        done < <(service_links)
+    fi
+}
+
+cmd_logs() {
+    local service="" follow=false tail=100 args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=true ;;
+            -n|--tail)   tail="$2"; shift ;;
+            -h|--help)   show_command_help logs; return 0 ;;
+            -*)          print_error "Unknown option for logs: $1"; return 1 ;;
+            *)           service="$1" ;;
+        esac
+        shift
+    done
+    require_env_light || return 1
+    if [[ "$service" == "db" ]]; then
+        if is_postgres_driver; then service="postgres"; else service="mariadb"; fi
+    fi
+    args=(logs "--tail=${tail}")
+    [[ "$follow" == "true" ]] && args+=(-f)
+    [[ -n "$service" ]] && args+=("$service")
+    compose "${args[@]}"
+}
+
+cmd_shell() {
+    local target="app" root=false container user_flag=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --root)    root=true ;;
+            -h|--help) show_command_help shell; return 0 ;;
+            *)         target="$1" ;;
+        esac
+        shift
+    done
+    require_env_light || return 1
+    container="$(container_for "$target")"
+    is_container_running "$container" || { print_error "Container '${container}' is not running"; return 1; }
+
+    if [[ "$container" == "$CONTAINER_NAME" && "$root" != "true" ]]; then
+        user_flag=(-u laravel)
+    fi
+    if docker exec "$container" sh -c 'command -v bash' >/dev/null 2>&1; then
+        docker exec -it "${user_flag[@]}" "$container" bash
+    else
+        docker exec -it "${user_flag[@]}" "$container" sh
+    fi
+}
+
+cmd_config() {
+    require_env start || return 1
+    compose config "$@"
+}
+
+# =============================================================================
+# Laravel / tooling commands (passthrough)
+# =============================================================================
+
+# run_in_app [--root] <cmd...>
+run_in_app() {
+    require_env_light || return 1
+    ensure_app_running || return 1
+    app_exec "$@"
+}
+
+cmd_exec() {
+    if [[ $# -eq 0 ]]; then
+        print_error "Usage: ./dock exec [--root] <command> [args]"
+        return 1
+    fi
+    run_in_app "$@"
+}
+
+cmd_node_tool() {
+    require_env_light || return 1
+    if ! is_local_env; then
+        print_error "Node is only installed in the local image (assets are built at image build time)"
+        return 1
+    fi
+    ensure_app_running && app_exec "$@"
+}
+
+cmd_pint() {
+    require_env_light || return 1
+    ensure_app_running || return 1
+    if ! app_run test -x vendor/bin/pint; then
+        print_error "Pint is not installed. Add it with: ./dock composer require laravel/pint --dev"
+        return 1
+    fi
+    app_exec vendor/bin/pint "$@"
+}
+
+cmd_fresh() {
+    require_env_light || return 1
+    if ! is_local_env; then
+        print_warning "migrate:fresh in ${APP_ENV}: this DROPS ALL TABLES."
+        confirm "Really wipe the ${DB_DATABASE:-?} database?" || return 1
+    fi
+    run_in_app php artisan migrate:fresh --seed "$@"
+}
+
+# =============================================================================
+# Database commands
+# =============================================================================
+
+db_container() { echo "${CONTAINER_NAME}-db"; }
+
+# db_exec [-i|-it] <client args...>: runs the DB client with credentials passed
+# through the environment (never visible in `ps`). -it degrades to -i when
+# stdin/stdout is not a terminal (`echo "select 1" | ./dock db`).
+db_exec() {
+    local tty=()
+    case "$1" in
+        -i)  tty=(-i); shift ;;
+        -it) tty=(-i); [[ -t 0 && -t 1 ]] && tty=(-it); shift ;;
+    esac
+    if is_postgres_driver; then
+        docker exec "${tty[@]}" -e PGPASSWORD="${DB_PASSWORD}" "$(db_container)" "$@"
+    else
+        docker exec "${tty[@]}" -e MYSQL_PWD="${DB_PASSWORD}" "$(db_container)" "$@"
+    fi
+}
+
+db_require() {
+    require_env_light || return 1
+    if ! is_container_running "$(db_container)"; then
+        print_error "Database container '$(db_container)' is not running"
+        return 1
+    fi
+}
+
+cmd_db() {
+    db_require || return 1
+    if is_postgres_driver; then
+        db_exec -it psql -U "${DB_USERNAME}" -d "${DB_DATABASE}"
+    else
+        db_exec -it mariadb -u "${DB_USERNAME}" "${DB_DATABASE}"
+    fi
+}
+
+cmd_db_dump() {
+    db_require || return 1
+    local file="${1:-}" status
+    if [[ -z "$file" ]]; then
+        mkdir -p "${PROJECT_ROOT}/backups"
+        file="${PROJECT_ROOT}/backups/${CONTAINER_NAME}-${DB_DATABASE}-$(date +%Y%m%d-%H%M%S).sql.gz"
     fi
 
-    # Change to project root
+    print_info "Dumping ${DB_DATABASE} to ${file#"${PROJECT_ROOT}"/}..."
+    (
+        umask 077
+        if is_postgres_driver; then
+            db_exec pg_dump -U "${DB_USERNAME}" --no-owner --clean --if-exists "${DB_DATABASE}"
+        else
+            db_exec mariadb-dump -u "${DB_USERNAME}" --single-transaction --quick --routines \
+                --triggers --no-tablespaces "${DB_DATABASE}"
+        fi | gzip > "$file"
+        exit "${PIPESTATUS[0]}"
+    )
+    status=$?
+    if [[ $status -ne 0 ]]; then
+        rm -f "$file"
+        print_error "Dump failed"
+        return 1
+    fi
+    print_success "Dump written: ${file#"${PROJECT_ROOT}"/} ($(du -h "$file" | cut -f1 | tr -d ' '))"
+    step_note "${file#"${PROJECT_ROOT}"/} ($(du -h "$file" | cut -f1 | tr -d ' '))"
+}
+
+cmd_db_restore() {
+    local file="${1:-}" reader=(cat)
+    if [[ -z "$file" || ! -f "$file" ]]; then
+        print_error "Usage: ./dock db:restore <file.sql|file.sql.gz>"
+        return 1
+    fi
+    db_require || return 1
+    [[ "$file" == *.gz ]] && reader=(gzip -dc)
+
+    print_warning "This imports ${file} into '${DB_DATABASE}' (${APP_ENV}), overwriting existing tables."
+    confirm "Restore now?" || return 1
+
+    if is_postgres_driver; then
+        "${reader[@]}" "$file" | db_exec -i psql -q -v ON_ERROR_STOP=1 -U "${DB_USERNAME}" -d "${DB_DATABASE}"
+    else
+        "${reader[@]}" "$file" | db_exec -i mariadb -u "${DB_USERNAME}" "${DB_DATABASE}"
+    fi
+    if [[ ${PIPESTATUS[1]} -ne 0 ]]; then
+        print_error "Restore failed"
+        return 1
+    fi
+    print_success "Restored ${file}"
+}
+
+# =============================================================================
+# deploy
+# =============================================================================
+
+cmd_deploy() {
+    local skip_pull=false backup=false after_pull=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -y|--yes)     DOCK_ASSUME_YES=true ;;
+            --skip-pull)  skip_pull=true ;;
+            --backup)     backup=true ;;
+            --after-pull) after_pull=true; skip_pull=true ;;
+            -h|--help)    show_command_help deploy; return 0 ;;
+            *)            print_error "Unknown option for deploy: $1"; return 1 ;;
+        esac
+        shift
+    done
+    export DOCK_ASSUME_YES
+
+    if [[ ! -d "${PROJECT_ROOT}/.git" ]]; then
+        print_error "${PROJECT_ROOT} is not a git checkout"
+        print_info "Clone the app repo on the server and run ./dock deploy inside it"
+        return 1
+    fi
+    require_env deploy || return 1
+    cd "$PROJECT_ROOT" || return 1
+
+    DOCK_DEPLOY_STARTED="${DOCK_DEPLOY_STARTED:-$(date +%s)}"
+    export DOCK_DEPLOY_STARTED
+
+    if [[ "$after_pull" != "true" ]]; then
+        print_header "Deploy · ${APP_NAME:-$CONTAINER_NAME}"
+        if is_local_env; then
+            print_warning "APP_ENV=${APP_ENV}: deploy is meant for staging/production"
+            confirm "Continue anyway?" || return 1
+        fi
+        deploy_preview "$skip_pull" || return 1
+
+        if [[ "$skip_pull" != "true" ]]; then
+            print_nl
+            steps_begin 0
+            run_step "Pulling $(git rev-parse --abbrev-ref HEAD)" deploy_pull || return 1
+            # Continue with the freshly pulled dock/scripts.
+            local flags=(deploy --after-pull --yes)
+            [[ "$backup" == "true" ]] && flags+=(--backup)
+            [[ "$VERBOSE" == "true" ]] && flags+=(--verbose)
+            [[ "$DEBUG" == "true" ]] && flags+=(--debug)
+            [[ "$QUIET" == "true" ]] && flags+=(--quiet)
+            exec "$DOCK_BIN" -e "$ENV_FILE" "${flags[@]}"
+        fi
+    fi
+
+    deploy_run "$backup"
+}
+
+# Fetch, show what will be deployed, confirm.
+deploy_preview() {
+    local skip_pull="$1" branch current target count
+    branch="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+    current="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    target="$current"
+
+    if [[ "$skip_pull" != "true" ]]; then
+        if [[ "$(git rev-parse --abbrev-ref HEAD)" != "$branch" ]]; then
+            print_error "Checked out '$(git rev-parse --abbrev-ref HEAD)' but BRANCH=${branch}. Run: git checkout ${branch}"
+            return 1
+        fi
+        steps_begin 0
+        if ! run_step "Fetching origin/${branch}" git fetch --tags origin "$branch"; then
+            print_info "Check the server's deploy key / token"
+            return 1
+        fi
+        target="$(git rev-parse --short "origin/${branch}")"
+    fi
+
+    print_section "${ICON_GEAR}Configuration"
+    print_kv "App" "${APP_NAME:-$CONTAINER_NAME}"
+    print_kv "Environment" "$APP_ENV"
+    print_kv "Server" "${SERVER}"
+    print_kv "Database" "$(get_db_driver)"
+    print_kv "Branch" "$branch"
+    print_kv "URL" "$(app_url)"
+    print_kv "Storage" "$(short_path "$STORAGE_MOUNT_PATH")"
+    print_kv "DB data" "$(short_path "$DB_MOUNT_PATH")"
+
+    print_section "${ICON_PACKAGE} Changes"
+    if [[ "$current" == "$target" ]]; then
+        print_info "Already at ${current}: no new commits (image is rebuilt, migrations re-run)"
+    else
+        count="$(git rev-list --count "HEAD..origin/${branch}" 2>/dev/null || echo "?")"
+        print_kv "From" "$current"
+        print_kv "To" "$target"
+        print_kv "Commits" "$count"
+        _is_quiet || git --no-pager log --no-merges --pretty="  %C(yellow)%h%C(reset) %s %C(dim)(%an)%C(reset)" \
+            "HEAD..origin/${branch}" | head -15
+        print_kv "Files" "$(git diff --name-only "HEAD..origin/${branch}" | wc -l | tr -d ' ')"
+        if git diff --name-only "HEAD..origin/${branch}" | grep -q 'database/migrations/'; then
+            print_warning "Includes new migrations (consider --backup)"
+        fi
+    fi
+    if [[ "$skip_pull" != "true" && -n "$(git status --porcelain --untracked-files=no)" ]]; then
+        print_warning "Local modifications in tracked files: they will be stashed and re-applied"
+    fi
+
+    [[ "${DOCK_ASSUME_YES:-false}" == "true" ]] && return 0
+    print_nl
+    confirm "Proceed with deployment?"
+}
+
+deploy_pull() {
+    local branch="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+    if ! git pull --ff-only --autostash origin "$branch"; then
+        echo "The checkout diverged from origin/${branch}: resolve it by hand (git status)."
+        return 1
+    fi
+}
+
+# In-process (it exports USER_ID/GROUP_ID): ids, APP_KEY, .env and storage perms.
+_deploy_prepare_host() {
+    local env_file uid gid
+    env_file="$(env_path)"
+
+    # Persist the UID/GID the image is built with, so every rebuild matches.
+    uid="$(get_env_value "$env_file" USER_ID)"; uid="${uid:-$(id -u)}"
+    gid="$(get_env_value "$env_file" GROUP_ID)"; gid="${gid:-$(id -g)}"
+    if [[ "$uid" == "0" || "$gid" == "0" ]]; then
+        print_warning "Deploying as root: container user is UID/GID 1000 (prefer a dedicated deploy user)"
+        uid=1000 gid=1000
+    fi
+    set_env_value "$env_file" USER_ID "$uid"
+    set_env_value "$env_file" GROUP_ID "$gid"
+    export USER_ID="$uid" GROUP_ID="$gid"
+
+    if [[ -z "$(get_env_value "$env_file" APP_KEY)" ]]; then
+        set_env_value "$env_file" APP_KEY "base64:$(random_base64 32)"
+        print_warning "Generated APP_KEY (keep a copy: losing it makes encrypted data unreadable)"
+    fi
+
+    # .env holds secrets: owner-only, owned by the container user (it is
+    # bind-mounted read-only into the app container).
+    chmod 600 "$env_file"
+    if [[ "$(ls -n "$env_file" | awk '{print $3}')" != "$uid" ]]; then
+        chown "${uid}:${gid}" "$env_file" 2>/dev/null \
+            || print_warning ".env is not owned by UID ${uid}: the app may not read it (sudo chown ${uid}:${gid} ${env_file})"
+    fi
+
+    prepare_compose_env
+    mkdir -p "$STORAGE_MOUNT_PATH" "$DB_MOUNT_PATH"
+    if ! chown -R "${uid}:${gid}" "$STORAGE_MOUNT_PATH" 2>/dev/null; then
+        [[ -w "$STORAGE_MOUNT_PATH" ]] || print_warning "Can't chown ${STORAGE_MOUNT_PATH}: sudo chown -R ${uid}:${gid} ${STORAGE_MOUNT_PATH}"
+    fi
+}
+
+# Web containers serve public/ from the host, but public/build is gitignored:
+# copy the assets built inside the image out to the host.
+_deploy_sync_assets() {
+    app_run test -d public/build || { echo "No public/build in the image"; return 0; }
+    rm -rf "${PROJECT_ROOT}/public/build.new"
+    docker cp "${CONTAINER_NAME}:/var/www/html/public/build/." "${PROJECT_ROOT}/public/build.new" || return 1
+    rm -rf "${PROJECT_ROOT}/public/build" && mv "${PROJECT_ROOT}/public/build.new" "${PROJECT_ROOT}/public/build"
+}
+
+_deploy_caches() {
+    local cmd rc=0
+    app_try "storage:link" php artisan storage:link --force
+    for cmd in config:cache route:cache view:cache event:cache; do
+        echo "artisan ${cmd}"
+        if ! app_run php artisan "$cmd"; then
+            print_warning "artisan ${cmd} failed (./dock artisan ${cmd} to see why)"
+            rc=1
+        fi
+    done
+    if app_run php artisan list --raw 2>/dev/null | grep -q '^filament:optimize'; then
+        app_try "filament:optimize" php artisan filament:optimize
+    fi
+    # opcache.validate_timestamps=0: the server must reload to see new caches.
+    reload_app_server
+    app_try "queue:restart" php artisan queue:restart
+    return $rc
+}
+
+_deploy_migrate() {
+    local out rc ran
+    out="$(app_run php artisan migrate --force 2>&1)"
+    rc=$?
+    echo "$out"
+    [[ $rc -ne 0 ]] && return $rc
+    ran="$(echo "$out" | _ui_clean | grep -E ' DONE' | awk '{print $1}')"
+    if [[ -z "$ran" ]]; then
+        step_note "nothing to migrate"
+    else
+        step_note "$(echo "$ran" | wc -l | tr -d ' ') ran: $(echo "$ran" | head -5 | paste -sd ',' - | sed 's/,/, /g')$( (( $(echo "$ran" | wc -l) > 5 )) && echo ", …")"
+    fi
+}
+
+deploy_run() {
+    local backup="$1" failed=0 total started="${DOCK_DEPLOY_STARTED:-$(date +%s)}"
+    local sync_assets=false do_backup=false
+
+    if ! is_local_env && [[ "$SERVER" == "nginx" || "$SERVER" == "caddy" ]]; then sync_assets=true; fi
+    [[ "$backup" == "true" ]] && is_container_running "$(db_container)" && do_backup=true
+
+    # prepare + [backup] + start_stack + [assets] + db + migrate + caches
+    total=$(( 1 + $(start_stack_steps true false) + 3 ))
+    [[ "$do_backup" == "true" ]] && total=$((total + 1))
+    [[ "$sync_assets" == "true" ]] && total=$((total + 1))
+
+    print_section "${ICON_PACKAGE} Deploying $(git rev-parse --short HEAD 2>/dev/null)"
+    ui_cursor_hide
+    steps_begin "$total"
+
+    run_step "Preparing host (.env, ids, permissions)" _deploy_prepare_host || return 1
+    if [[ "$do_backup" == "true" ]]; then
+        run_step "Backing up database" cmd_db_dump \
+            || { print_error "Backup failed: nothing was changed"; return 1; }
+    elif [[ "$backup" == "true" ]]; then
+        print_warning "Database not running yet: no backup taken"
+    fi
+
+    start_stack true false || { ui_cursor_show; return 1; }
+
+    if [[ "$sync_assets" == "true" ]]; then
+        run_step "Syncing public/build to the host" _deploy_sync_assets \
+            || print_warning "Asset sync failed: CSS/JS may 404"
+    fi
+    run_step "Waiting for the database" wait_for_db 90 || { ui_cursor_show; return 1; }
+
+    if run_step "Running migrations" _deploy_migrate; then
+        :
+    else
+        failed=1
+    fi
+    run_step "Caching config, routes, views, events + reload" _deploy_caches || true
+    ui_cursor_show
+
+    print_container_status
+    if [[ $failed -ne 0 ]]; then
+        print_box "$RED" "${RED}${BOLD}${CROSSMARK} Deployed with errors${NC}" "" "Migrations failed: the new code is live on the old schema." "Fix, then: ./dock deploy --skip-pull -y"
+        return 1
+    fi
+    print_done_box "Deployed $(git rev-parse --short HEAD 2>/dev/null)" $(( $(date +%s) - started ))
+}
+
+# =============================================================================
+# doctor
+# =============================================================================
+
+cmd_doctor() {
+    local problems=0 warnings=0 f
+    _ok()   { print_msg "  ${GREEN}${CHECKMARK}${NC} $*"; }
+    _warn() { print_msg "  ${YELLOW}!${NC} $*"; warnings=$((warnings + 1)); }
+    _fail() { print_msg "  ${RED}${CROSSMARK}${NC} $*"; problems=$((problems + 1)); }
+
+    print_header "Doctor"
+
+    print_section "Host"
+    if check_docker 2>/dev/null; then
+        _ok "Docker $(docker version -f '{{.Server.Version}}' 2>/dev/null), Compose $(docker compose version --short 2>/dev/null)"
+    else
+        _fail "Docker / Compose not available"
+    fi
+    _ok "bash ${BASH_VERSION}"
+
+    print_section "Configuration"
+    if load_env "$(env_path)" 2>/dev/null; then
+        if validate_full_env start 2>/dev/null; then _ok ".env valid"; else _fail ".env invalid: run ./dock config for details"; fi
+        prepare_compose_env
+        if compose config -q 2>/dev/null; then _ok "Compose config resolves"; else _fail "docker compose config failed: ./dock config"; fi
+        [[ -n "$(get_env_value "$(env_path)" APP_KEY)" ]] && _ok "APP_KEY set" || _warn "APP_KEY empty (./dock start generates it locally, deploy in production)"
+        if ! is_local_env; then
+            [[ "${APP_DEBUG:-}" == "true" ]] && _fail "APP_DEBUG=true outside local" || _ok "APP_DEBUG off"
+            [[ "${DB_PASSWORD:-}" == "password" ]] && _fail "DB_PASSWORD is the template default" || _ok "DB_PASSWORD customised"
+            [[ "$(ls -n "$(env_path)" | awk '{print $1}')" == "-rw-------"* ]] && _ok ".env is 600" || _warn ".env readable by others (chmod 600 .env)"
+            if has_service meilisearch && [[ "${MEILISEARCH_KEY:-masterkey}" == "masterkey" ]]; then _fail "MEILISEARCH_KEY is the default"; fi
+        fi
+        if [[ "${SERVICES_BIND:-127.0.0.1}" == "0.0.0.0" ]] && ! is_local_env; then
+            _warn "SERVICES_BIND=0.0.0.0 publishes DB/Redis/... on every interface"
+        fi
+    else
+        _fail "$(env_path) not found"
+    fi
+
+    print_section "Project files"
+    for f in vendor node_modules .env; do
+        grep -qE "^/?${f}/?$" "${PROJECT_ROOT}/.dockerignore" 2>/dev/null && _ok ".dockerignore excludes ${f}" || _fail ".dockerignore must exclude ${f}"
+    done
+    for f in "$DB_MOUNT_PATH" "${PROJECT_ROOT}/backups"; do
+        [[ "$f" == "${PROJECT_ROOT}"/* ]] || continue
+        f="${f#"${PROJECT_ROOT}"/}"
+        grep -qE "^/?${f}/?\*?$" "${PROJECT_ROOT}/.dockerignore" 2>/dev/null || _warn "Add /${f} to .dockerignore"
+        grep -qE "^/?${f}/?\*?$" "${PROJECT_ROOT}/.gitignore" 2>/dev/null || _warn "Add /${f} to .gitignore"
+    done
+
+    print_section "Runtime"
+    if is_container_running "${CONTAINER_NAME:-}"; then
+        _ok "App container running"
+        local uid
+        uid="$(app_run id -u 2>/dev/null)"
+        [[ "$uid" == "$USER_ID" ]] && _ok "Container UID matches USER_ID (${uid})" || _warn "Container UID ${uid} != USER_ID ${USER_ID}: ./dock start --build"
+        app_run test -f vendor/autoload.php && _ok "vendor/ present" || _fail "vendor/ missing"
+        app_run test -w storage/logs && _ok "storage/ writable by laravel" || _fail "storage/ not writable by laravel"
+        if supervisorctl_app status >/dev/null 2>&1; then _ok "All supervisor programs running"; else _fail "Supervisor programs down:"; supervisorctl_app status 2>/dev/null | grep -v RUNNING | sed 's/^/      /'; fi
+        if [[ "${SERVER:-}" == "octane" ]]; then
+            app_run test -d vendor/laravel/octane && _ok "laravel/octane installed" || _fail "laravel/octane missing"
+        fi
+    else
+        _warn "App container not running (./dock start)"
+    fi
+    if is_container_running "${CONTAINER_NAME:-x}-db"; then
+        [[ "$(docker inspect -f '{{.State.Health.Status}}' "${CONTAINER_NAME}-db" 2>/dev/null)" == "healthy" ]] && _ok "Database healthy" || _warn "Database not healthy yet"
+    fi
+
+    print_nl
+    if [[ $problems -gt 0 ]]; then
+        print_error "${problems} problem(s), ${warnings} warning(s)"
+        return 1
+    fi
+    print_success "No problems found (${warnings} warning(s))"
+}
+
+# =============================================================================
+# update / install
+# =============================================================================
+
+cmd_update() {
+    local check=false tmp src rel changed=0
+    [[ "${1:-}" == "--check" ]] && check=true
+    { command_exists curl && command_exists tar; } || { print_error "curl and tar are required"; return 1; }
+
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    print_info "Downloading ${DOCK_REPO}@${DOCK_BRANCH}..."
+    if ! curl -fsSL "https://codeload.github.com/${DOCK_REPO}/tar.gz/refs/heads/${DOCK_BRANCH}" | tar -xz -C "$tmp"; then
+        print_error "Download failed"
+        return 1
+    fi
+    src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+
+    print_section "Managed files (replaced)"
+    while IFS= read -r rel; do
+        if ! cmp -s "${src}/${rel}" "${PROJECT_ROOT}/${rel}"; then
+            print_msg "  ${YELLOW}~${NC} ${rel}"
+            changed=$((changed + 1))
+        fi
+    done < <(cd "$src" && { echo dock; find scripts/lib docker/compose docker/Dockerfile docker/AGENTS.md -type f 2>/dev/null; } | sort)
+
+    print_section "docker/config (yours: only new files are added)"
+    while IFS= read -r rel; do
+        if [[ ! -f "${PROJECT_ROOT}/${rel}" ]]; then
+            print_msg "  ${GREEN}+${NC} ${rel}"
+            changed=$((changed + 1))
+        elif ! cmp -s "${src}/${rel}" "${PROJECT_ROOT}/${rel}"; then
+            print_msg "  ${DIM}≠ ${rel}  (upstream: https://github.com/${DOCK_REPO}/blob/${DOCK_BRANCH}/${rel})${NC}"
+        fi
+    done < <(cd "$src" && find docker/config -type f | sort)
+
+    if [[ $changed -eq 0 ]]; then
+        print_success "Already up to date"
+        return 0
+    fi
+    [[ "$check" == "true" ]] && return 0
+
+    print_nl
+    print_info "Tip: commit first, then review with git diff"
+    confirm "Apply ${changed} change(s)?" || return 1
+
+    cp "${src}/dock" "$DOCK_BIN.new" && chmod +x "$DOCK_BIN.new"
+    mkdir -p "${PROJECT_ROOT}/scripts/lib" "${PROJECT_ROOT}/docker/compose"
+    cp -R "${src}/scripts/lib/." "${PROJECT_ROOT}/scripts/lib/"
+    cp -R "${src}/docker/compose/." "${PROJECT_ROOT}/docker/compose/"
+    for rel in docker/Dockerfile docker/AGENTS.md; do
+        [[ -f "${src}/${rel}" ]] && cp "${src}/${rel}" "${PROJECT_ROOT}/${rel}"
+    done
+    (cd "$src" && find docker/config -type f) | while IFS= read -r rel; do
+        [[ -f "${PROJECT_ROOT}/${rel}" ]] && continue
+        mkdir -p "$(dirname "${PROJECT_ROOT}/${rel}")"
+        cp "${src}/${rel}" "${PROJECT_ROOT}/${rel}"
+    done
+    # Replace the running script last, atomically.
+    mv "$DOCK_BIN.new" "$DOCK_BIN"
+    print_success "Updated. Rebuild to apply image changes: ./dock start --build"
+}
+
+cmd_install() {
+    if [[ -f "${PROJECT_ROOT}/configure-app.sh" ]]; then
+        bash "${PROJECT_ROOT}/configure-app.sh" "$@"
+    else
+        bash <(curl -fsSL "https://raw.githubusercontent.com/${DOCK_REPO}/${DOCK_BRANCH}/configure-app.sh") "$@"
+    fi
+}
+
+# =============================================================================
+# Argument parsing
+# =============================================================================
+
+# parse_global_flag <flag> [value]: returns 0 = consumed 1 arg, 2 = consumed 2, 1 = not global.
+parse_global_flag() {
+    case "$1" in
+        -v|--verbose) VERBOSE=true ;;
+        -q|--quiet)   QUIET=true ;;
+        --debug)      DEBUG=true VERBOSE=true ;;
+        -y|--yes)     DOCK_ASSUME_YES=true ;;
+        -e|--env)
+            [[ -n "${2:-}" ]] || { print_error "--env needs a file"; exit 1; }
+            ENV_FILE="$2"; return 2 ;;
+        *) return 1 ;;
+    esac
+    return 0
+}
+
+parse_args() {
+    local rc
+    # Global options before the command.
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)    show_help; exit 0 ;;
+            -V|--version) echo "dock v${VERSION}"; exit 0 ;;
+            -*)
+                parse_global_flag "$1" "${2:-}"; rc=$?
+                case $rc in
+                    0) shift ;;
+                    2) shift 2 ;;
+                    *) print_error "Unknown option: $1"; exit 1 ;;
+                esac ;;
+            *) COMMAND="$1"; shift; break ;;
+        esac
+    done
+
+    # Wrapped tools get their arguments verbatim (`./dock artisan test -v`).
+    if [[ "$PASSTHROUGH_COMMANDS" == *" ${COMMAND} "* ]]; then
+        ARGS=("$@")
+        return
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        parse_global_flag "$1" "${2:-}"; rc=$?
+        case $rc in
+            0) shift ;;
+            2) shift 2 ;;
+            *) ARGS+=("$1"); shift ;;
+        esac
+    done
+}
+
+main() {
+    parse_args "$@"
+    export VERBOSE QUIET DEBUG DOCK_ASSUME_YES
+
     cd "$PROJECT_ROOT" || exit 1
 
-    # Dispatch command
     case "$COMMAND" in
-        start)    cmd_start "${ARGS[@]}" ;;
-        stop)     cmd_stop "${ARGS[@]}" ;;
-        restart)  cmd_restart "${ARGS[@]}" ;;
-        status)   cmd_status "${ARGS[@]}" ;;
-        logs)     cmd_logs "${ARGS[@]}" ;;
-        shell|sh) cmd_shell "${ARGS[@]}" ;;
-        exec)     cmd_exec "${ARGS[@]}" ;;
-        artisan)  cmd_artisan "${ARGS[@]}" ;;
-        composer) cmd_composer "${ARGS[@]}" ;;
-        npm)      cmd_npm "${ARGS[@]}" ;;
-        tinker)   cmd_tinker "${ARGS[@]}" ;;
-        migrate)  cmd_migrate "${ARGS[@]}" ;;
-        fresh)    cmd_fresh "${ARGS[@]}" ;;
-        seed)     cmd_seed "${ARGS[@]}" ;;
-        deploy)   cmd_deploy "${ARGS[@]}" ;;
-        install)  cmd_install "${ARGS[@]}" ;;
-        help)     show_help ;;
+        "")                 show_help ;;
+        start|up)           cmd_start "${ARGS[@]}" ;;
+        stop|down)          cmd_stop "${ARGS[@]}" ;;
+        restart)            cmd_restart "${ARGS[@]}" ;;
+        build)              cmd_build "${ARGS[@]}" ;;
+        status|ps)          cmd_status "${ARGS[@]}" ;;
+        logs)               cmd_logs "${ARGS[@]}" ;;
+        shell|sh)           cmd_shell "${ARGS[@]}" ;;
+        config)             cmd_config "${ARGS[@]}" ;;
+        exec)               cmd_exec "${ARGS[@]}" ;;
+        artisan|a)          run_in_app php artisan "${ARGS[@]}" ;;
+        composer)           run_in_app composer "${ARGS[@]}" ;;
+        php)                run_in_app php "${ARGS[@]}" ;;
+        npm|npx|node)       cmd_node_tool "$COMMAND" "${ARGS[@]}" ;;
+        tinker)             run_in_app php artisan tinker "${ARGS[@]}" ;;
+        test)               run_in_app php artisan test "${ARGS[@]}" ;;
+        pint|format)        cmd_pint "${ARGS[@]}" ;;
+        migrate)            run_in_app php artisan migrate "${ARGS[@]}" ;;
+        fresh)              cmd_fresh "${ARGS[@]}" ;;
+        seed)               run_in_app php artisan db:seed "${ARGS[@]}" ;;
+        db)                 cmd_db "${ARGS[@]}" ;;
+        db:dump)            cmd_db_dump "${ARGS[@]}" ;;
+        db:restore)         cmd_db_restore "${ARGS[@]}" ;;
+        deploy)             cmd_deploy "${ARGS[@]}" ;;
+        doctor)             cmd_doctor "${ARGS[@]}" ;;
+        update|self-update) cmd_update "${ARGS[@]}" ;;
+        install)            cmd_install "${ARGS[@]}" ;;
+        help)               show_command_help "${ARGS[0]:-}" ;;
+        version)            echo "dock v${VERSION}" ;;
         *)
             print_error "Unknown command: ${COMMAND}"
-            print_info "Run './dock help' for usage"
-            exit 1
-            ;;
+            print_info "Run ./dock help"
+            return 1 ;;
     esac
 }
 

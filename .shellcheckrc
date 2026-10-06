@@ -1,0 +1,8 @@
+# shellcheck config for dock, configure-app.sh and scripts/lib
+external-sources=true
+shell=bash
+# SC1091: libs are sourced via runtime paths
+# SC2015: `test && ok || warn` is used where ok() always succeeds
+# SC2059: printf formats deliberately embed color variables
+# SC2012: ls -n is used on single known files
+disable=SC1091,SC2015,SC2059,SC2012

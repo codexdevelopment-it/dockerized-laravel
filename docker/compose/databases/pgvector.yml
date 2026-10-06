@@ -1,31 +1,34 @@
 # =============================================================================
-# PostgreSQL + pgvector — base service definition
-# Same as postgres.yml but ships the `vector` extension
-# (image pgvector/pgvector:${PGVECTOR_VERSION:-0.8.6-pg17}). Select with DB_DRIVER=pgvector.
-# Env-specific overrides are in pgvector-local.yml / pgvector-staging.yml / etc.
-#
-# Keeps the service/host name `postgres` so DB_HOST=postgres stays identical to
-# DB_DRIVER=postgres.
+# PostgreSQL + pgvector: base service (no published port, bind-mounted data dir).
+# Env overrides: pgvector-local.yml / -staging.yml / -production.yml.
+# Same as postgres.yml plus the vector extension. Service/host name stays
+# `postgres` so DB_HOST is identical for both drivers. PGVECTOR_VERSION is pinned.
 # =============================================================================
 
 services:
   postgres:
     container_name: '${CONTAINER_NAME}-db'
-    image: 'pgvector/pgvector:${PGVECTOR_VERSION:-0.8.6-pg17}'
+    image: 'pgvector/pgvector:${PGVECTOR_VERSION:-0.8.7-pg17}'
     restart: '${RESTART_POLICY:-no}'
     environment:
       POSTGRES_DB: '${DB_DATABASE}'
       POSTGRES_USER: '${DB_USERNAME}'
       POSTGRES_PASSWORD: '${DB_PASSWORD}'
-      TZ: '${APP_TIMEZONE:-Europe/Rome}'
+      TZ: '${APP_TIMEZONE:-UTC}'
     volumes:
-      - '${DB_MOUNT_PATH:-./db-data}:/var/lib/postgresql/data'
+      - '${DB_MOUNT_PATH}:/var/lib/postgresql/data'
       # Creates the `vector` extension on a fresh data dir.
       - '../config/postgres/pgvector-init.sql:/docker-entrypoint-initdb.d/10-pgvector.sql:ro'
     networks:
       - app-network
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-app} -d ${DB_DATABASE:-app}']
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

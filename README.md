@@ -1,374 +1,337 @@
 # 🐳 Dockerized Laravel
 
-Dockerize any Laravel application in seconds. One command to set up a complete development environment with production-ready optimizations.
+Drop-in Docker toolkit for Laravel. One installer adds a `./dock` CLI, a modular Docker Compose setup and
+production-ready images to any Laravel project — new or existing. Nothing but Docker is needed on the host,
+and the same `./dock deploy` command ships it to a server.
 
-## Quick Start
+- **PHP 8.5** (configurable), Composer 2, Node 24 LTS, supervisor-managed workers and scheduler
+- Servers: `artisan`, `octane` (FrankenPHP 1.13), `nginx`, `caddy` (automatic HTTPS), `fpm`
+- Databases: MariaDB 11.4 LTS, PostgreSQL 16, PostgreSQL + pgvector — pinned versions
+- Optional services: Redis 8, Mailpit, Meilisearch, phpMyAdmin, Soketi, Gotenberg
+- One-command, idempotent deploys with preview, confirmation, optional DB backup
+- Secure defaults: non-root app user, auxiliary ports bound to `127.0.0.1`, log rotation
+
+## Contents
+
+- [Quick start](#quick-start) · [Commands](#commands) · [Configuration](#configuration)
+- [Servers](#servers) · [Databases](#databases) · [Services](#services)
+- [Production deployment](#production-deployment) · [Updating](#updating-the-toolkit)
+- [How it works](#how-it-works) · [AI agents](#ai-coding-agents) · [Troubleshooting](#troubleshooting)
+
+## Quick start
 
 ```bash
-# Install in your Laravel project
-bash <(curl -s https://raw.githubusercontent.com/codexdevelopment-it/dockerized-laravel/main/configure-app.sh)
+# Existing project: run in the Laravel root
+bash <(curl -fsSL https://raw.githubusercontent.com/Murkrow02/dockerized-laravel/main/configure-app.sh)
 
-# Start the application
+# Then
 ./dock start
 ```
 
-Your app is now running at `http://localhost:8000`
+The app is at `http://localhost:8000`. Choosing *new* creates `./<name>/` with a fresh Laravel app
+(`composer create-project` runs inside the image).
 
-## Commands
+The installer:
 
-```bash
-./dock start              # Start containers
-./dock stop               # Stop containers
-./dock restart            # Restart containers
-./dock status             # Show status
-./dock logs [-f]          # View logs
-./dock shell              # Shell into app container
-./dock shell db           # Shell into database
+- copies `dock`, `scripts/lib/` and `docker/` into the project;
+- **keeps your `.env`** (backup in `.env.backup-<date>`), adds the dock settings, points `DB_HOST` at the
+  container and generates a random `DB_PASSWORD`;
+- appends what it needs to `.dockerignore` and `.gitignore` (`/db-data`, `/backups`);
+- links `docker/AGENTS.md` from `AGENTS.md` / `CLAUDE.md` for AI coding agents.
 
-./dock artisan <cmd>      # Run artisan commands
-./dock composer <cmd>     # Run composer
-./dock npm <cmd>          # Run npm
-./dock tinker             # Laravel Tinker
-./dock migrate            # Run migrations
-./dock fresh              # Fresh migrate + seed
-./dock seed               # Run seeders
-```
-
-Add `-v` or `--verbose` for detailed output.
-
-## Configuration
-
-Edit `.env` to configure:
-
-```env
-CONTAINER_NAME=myapp      # Container prefix
-APP_ENV=local             # local | staging | production
-SERVER=octane             # artisan | octane | fpm | nginx | caddy
-DB_DRIVER=mariadb         # mariadb | postgres | pgvector
-SERVICES=redis,mailpit    # Additional services (comma-separated)
-APP_PORT=8000             # Application port
-```
-
-### Server Types
-
-| Server | App container runs | Front | HTTPS | Requires `laravel/octane` |
-|--------|--------------------|-------|-------|---------------------------|
-| `artisan` | `php artisan serve` (dev only) | — | no | no |
-| `octane` | FrankenPHP HTTP on `:8000` | — (direct) | no | **yes** |
-| `nginx` | `php-fpm` on `:9000` | `nginx:alpine` | no | no |
-| `caddy` | `php-fpm` on `:9000` | `caddy:alpine` | auto via `DOMAIN` | no |
-| `fpm` | `php-fpm` on `:9000` | — (bring your own) | no | no |
-
-Base image is `php:8.3-fpm-bookworm` — it ships `php-fpm` and `php-cli`. The FrankenPHP binary is installed on top so `octane` mode also works. Pick whichever server fits the app (older Laravel apps that don't support Octane go with `nginx`/`caddy`/`fpm`).
-
-PHP tuning lives in `docker/config/php/` (`base.ini` + `<env>.ini`). For `octane`, FrankenPHP's static binary carries its own embedded PHP and only reads `/etc/frankenphp/php.d/*.ini`, so `servers/octane.yml` mounts those same inis there too (otherwise the worker silently falls back to defaults like `post_max_size=8M`).
-
-### Available Services
-
-| Service | Ports | Description |
-|---------|-------|-------------|
-| `redis` | 6379 | Cache and queues |
-| `mailpit` | 1025, 8025 | Email testing (UI at :8025) |
-| `meilisearch` | 7700 | Full-text search |
-| `phpmyadmin` | 8080 | Database management |
-| `soketi` | 6001 | WebSocket server |
-
-### Database Drivers
-
-`DB_DRIVER` picks the database compose files. Each driver has a base file plus
-`-local` / `-staging` / `-production` overrides (local & staging expose the DB port;
-production adds memory limits). All three run as container `${CONTAINER_NAME}-db`.
-
-| `DB_DRIVER` | Image | Notes |
-|-------------|-------|-------|
-| `mariadb` (default) | `mariadb:11.4` | `DB_CONNECTION=mysql`, `DB_HOST=mariadb`, `DB_PORT=3306` |
-| `postgres` | `postgres:16.15-alpine` | `DB_CONNECTION=pgsql`, `DB_HOST=postgres`, `DB_PORT=5432` |
-| `pgvector` | `pgvector/pgvector:0.8.6-pg17` | Same as `postgres` + the `vector` extension (auto-created on a fresh data dir via `docker/config/postgres/pgvector-init.sql`). Same service/host name `postgres`. |
-
-Tags are pinned to a minor/LTS line so local, staging and production never drift
-apart, and a `dock deploy --build` never silently pulls a newer major that would
-rewrite the (major-locked) data dir. Override per driver in `.env` with
-`MARIADB_VERSION` / `POSTGRES_VERSION` / `PGVECTOR_VERSION`; bump deliberately — a
-same-major bump is safe in place, a major bump needs `pg_upgrade` or dump/restore.
-
-When switching to `postgres`/`pgvector`, also set `DB_CONNECTION=pgsql`, `DB_HOST=postgres`,
-`DB_PORT=5432` in `.env` (the installer does this for you).
-
-## Installation Options
+Non-interactive:
 
 ```bash
-# Interactive (asks questions)
-bash <(curl -s .../configure-app.sh)
-
-# Non-interactive for new project
-bash <(curl -s .../configure-app.sh) -t new -n "My App" -c myapp --non-interactive
-
-# Non-interactive for existing project
-bash <(curl -s .../configure-app.sh) -t existing -n "My App" --non-interactive
+./configure-app.sh -t existing -n "My App" -c myapp --db-driver postgres --server nginx -y --non-interactive
+./configure-app.sh -t new      -n "My App" -c myapp --non-interactive
 ```
 
 | Flag | Description |
-|------|-------------|
+|---|---|
 | `-t, --type` | `new` or `existing` |
 | `-n, --name` | Application name |
-| `-c, --container` | Container base name |
-| `-d, --database` | Database name |
-| `-r, --repo` | Repository URL (for deployment) |
-| `--non-interactive` | Skip all prompts |
+| `-c, --container` | Container prefix (`myapp` → `myapp`, `myapp-db`, …) |
+| `-d, --database` | Database name (default: container name) |
+| `--db-driver` | `mariadb` (default), `postgres`, `pgvector` |
+| `--server` | `artisan` (default), `octane`, `nginx`, `caddy`, `fpm` |
+| `-y`, `--non-interactive` | Skip confirmation / all prompts |
 
-## Production Deployment
+## Commands
 
-The deploy is dead simple: **clone the repo to the server once, edit `.env`, then `./dock deploy` forever after.** Every subsequent deploy is the same single command.
+```text
+Lifecycle   start [--build] [--no-cache] · stop · restart [--build] · build [--no-cache] [--pull]
+            status · logs [service] [-f] [-n N] · shell [service] [--root] · config
+Laravel     artisan|a · composer · npm · npx · node · php · exec [--root] · tinker · test
+            pint|format · migrate · fresh · seed
+Database    db · db:dump [file] · db:restore <file>
+Operations  deploy [-y] [--skip-pull] [--backup] · doctor · update [--check] · help [command]
+Global      -v/--verbose · -q/--quiet · -y/--yes · -e/--env <file> · --debug
+```
 
-### 1. Prepare the server (one-time)
+Examples:
 
 ```bash
-# Docker + Compose V2
+./dock artisan make:model Post -m      # arguments pass through untouched (even -v, -h)
+./dock composer require laravel/horizon
+./dock npm run dev
+./dock test --filter=UserTest
+./dock pint --test
+./dock logs app -f
+./dock shell db
+echo "select count(*) from users;" | ./dock db
+./dock db:dump && ./dock db:restore backups/myapp-myapp-20260101-120000.sql.gz
+```
+
+`start`, `restart` and `deploy` show numbered steps with a live spinner and finish with a status table:
+
+```text
+✓ [1/4] Building image myapp:local 41s
+✓ [2/4] Starting containers 3s
+✓ [3/4] Installing Composer dependencies 28s
+✓ [4/4] Preparing app 2s
+
+  SERVICE        STATE        HEALTH      PORTS
+  app            ● running    healthy     8000
+  mariadb        ● running    healthy     127.0.0.1:3306
+  redis          ● running    healthy     127.0.0.1:6379
+
+╭───────────────────────────────────────╮
+│  ✓ Ready in 1m 14s                    │
+│                                       │
+│  App          http://localhost:8000   │
+│  Mailpit      http://localhost:8025   │
+╰───────────────────────────────────────╯
+```
+
+Command output is shown only when a step fails (the relevant tail + full log path) or with `-v`.
+
+Tool commands run as the container user `laravel`, whose UID/GID match yours, so generated files and
+`storage/` logs keep the right owner. `./dock exec --root …` and `./dock shell --root` are there when you
+need root. They work without a TTY too (CI, pipes).
+
+## Configuration
+
+Everything lives in `.env`. Docker-related keys:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CONTAINER_NAME` | — | Prefix for containers, compose project, image |
+| `APP_ENV` | `local` | `local` / `staging` / `production`: compose overrides, PHP ini, workers, image target |
+| `SERVER` | `artisan` | `artisan` · `octane` · `nginx` · `caddy` · `fpm` |
+| `DB_DRIVER` | `mariadb` | `mariadb` · `postgres` · `pgvector` |
+| `SERVICES` | — | Comma separated: `redis,mailpit,meilisearch,phpmyadmin,soketi,gotenberg` |
+| `APP_PORT` | `8000` | Host port of the app (`caddy` uses `HTTP_PORT`/`HTTPS_PORT`) |
+| `DOMAIN` | — | Caddy automatic HTTPS domain |
+| `BRANCH` | current | Branch pulled by `./dock deploy` |
+| `STORAGE_MOUNT_PATH` | `./storage` | Host dir for `storage/` (staging/production) |
+| `DB_MOUNT_PATH` | `./db-data` | Host dir for database files |
+| `SERVICES_BIND` | `127.0.0.1` | Interface for DB / Redis / Mailpit / … host ports |
+| `FORWARD_DB_PORT`, `FORWARD_REDIS_PORT` | `3306`/`5432`, `6379` | Host-side ports (the app keeps the container ports) |
+| `MAILPIT_UI_PORT`, `MEILISEARCH_PORT`, `PHPMYADMIN_PORT`, `SOKETI_PORT`, `GOTENBERG_PORT` | defaults | Host-side ports |
+| `PHP_VERSION` | `8.5` | PHP minor version of the image |
+| `NODE_VERSION` | `24` | Node major (local image + asset build) |
+| `PHP_EXTENSIONS` | — | Extra extensions, e.g. `"imagick soap"` ([list](https://github.com/mlocati/docker-php-extension-installer#supported-php-extensions)) |
+| `FRANKENPHP_VERSION` | `1.13.0` | FrankenPHP binary for `SERVER=octane` |
+| `APP_MEMORY_LIMIT`, `DB_MEMORY_LIMIT` | `1G` | Container memory limits in production |
+| `USER_ID`, `GROUP_ID` | your UID/GID | Container user (written by `deploy`) |
+
+Relative mount paths are relative to the project root. Variables already exported in your shell override
+`.env` (`APP_PORT=8080 ./dock start`). After changing image settings (`PHP_*`, `NODE_VERSION`) run
+`./dock start --build`; for everything else `./dock restart` is enough.
+
+PHP tuning is in `docker/config/php/` (`base.ini` + `<env>.ini`), workers in `docker/config/supervisor/`,
+web servers in `docker/config/{nginx,caddy,fpm}/`. Those files are yours to customise.
+
+## Servers
+
+| `SERVER` | App container | In front | Notes |
+|---|---|---|---|
+| `artisan` | `php artisan serve` (supervised) | — | Development only |
+| `octane` | FrankenPHP worker on `:8000` | — | `laravel/octane` required (auto-installed locally). `--watch` locally: `./dock npm i -D chokidar` |
+| `nginx` | php-fpm `:9000` | `nginx` | Static files served by nginx |
+| `caddy` | php-fpm `:9000` | `caddy` | Automatic HTTPS for `DOMAIN` (ports 80/443) |
+| `fpm` | php-fpm `:9000` | your own | FastCGI published on `127.0.0.1:APP_PORT` only |
+
+FrankenPHP is baked only into `octane` images (tagged `<name>:<env>-octane`), so other images stay
+~100 MB smaller and switching `SERVER` rebuilds automatically.
+
+## Databases
+
+| `DB_DRIVER` | Image | `.env` |
+|---|---|---|
+| `mariadb` | `mariadb:11.4` | `DB_CONNECTION=mysql`, `DB_HOST=mariadb`, `DB_PORT=3306` |
+| `postgres` | `postgres:16.15-alpine` | `DB_CONNECTION=pgsql`, `DB_HOST=postgres`, `DB_PORT=5432` |
+| `pgvector` | `pgvector/pgvector:0.8.7-pg17` | as `postgres`; `vector` extension created on a fresh data dir |
+
+The DB runs as `<CONTAINER_NAME>-db`; data is bind-mounted from `DB_MOUNT_PATH`. Local and staging publish
+the port on `127.0.0.1:FORWARD_DB_PORT` for desktop clients; production publishes nothing.
+
+Versions are pinned (override with `MARIADB_VERSION` / `POSTGRES_VERSION` / `PGVECTOR_VERSION`) so a
+rebuild never silently changes the major that owns the data dir. Same-major bumps are safe in place
+(MariaDB runs `mariadb-upgrade` automatically); a PostgreSQL major bump needs `./dock db:dump`, a fresh
+`DB_MOUNT_PATH`, then `./dock db:restore`.
+
+## Services
+
+| Service | Image | Host port (on `SERVICES_BIND`) | From the app |
+|---|---|---|---|
+| `redis` | `redis:8-alpine` | `FORWARD_REDIS_PORT` 6379 | `redis:6379` |
+| `mailpit` | `axllent/mailpit:v1.31` | UI 8025, SMTP 1025 | `mailpit:1025` |
+| `meilisearch` | `getmeili/meilisearch:v1.54` | 7700 | `http://meilisearch:7700` |
+| `phpmyadmin` | `phpmyadmin:5.2` | 8080 | MariaDB only |
+| `soketi` | `quay.io/soketi/soketi` | 6001 (public, `SOKETI_BIND`) | `soketi:6001` |
+| `gotenberg` | `gotenberg/gotenberg:8` | 3000 | `http://gotenberg:3000` |
+
+Each image tag is overridable (`REDIS_VERSION`, `MAILPIT_VERSION`, `MEILISEARCH_VERSION`, …).
+Outside local set `MEILISEARCH_KEY` (16+ chars) and `MEILI_ENV=production`.
+
+## Production deployment
+
+Clone the app once on the server, write the `.env`, then `./dock deploy` forever after.
+
+### 1. Server (one-time)
+
+```bash
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-newgrp docker                   # or log out / back in
-
-sudo apt-get install -y git openssl
-docker compose version          # verify
+sudo adduser deploy && sudo usermod -aG docker deploy   # deploy as a non-root user
+sudo -iu deploy
+ssh-keygen -t ed25519 -C "deploy@$(hostname)"            # add ~/.ssh/id_ed25519.pub as a read-only deploy key
 ```
 
-If your app repo is **private**, give the server an SSH key:
+### 2. Clone and configure
 
 ```bash
-ssh-keygen -t ed25519 -C "deploy@$(hostname)"
-cat ~/.ssh/id_ed25519.pub       # add this as a deploy key in GitHub/GitLab
-ssh -T git@github.com           # accept fingerprint
+git clone git@github.com:you/myapp.git /srv/myapp && cd /srv/myapp
+cp .env.example .env && nano .env
 ```
-
-### 2. Clone your app once
-
-```bash
-sudo mkdir -p /var/www && sudo chown $USER /var/www
-cd /var/www
-git clone git@github.com:you/myapp.git
-cd myapp
-```
-
-(Your app repo should already have `dock` + `scripts/` + `docker/` committed — those are produced by the installer when the project was first set up.)
-
-### 3. Create the production `.env`
-
-In the same dir:
-
-```bash
-cp .env.example .env            # or scp it up from your laptop
-nano .env
-```
-
-Minimum required values:
 
 ```env
-APP_NAME="My App"
 APP_ENV=production
 APP_DEBUG=false
 APP_URL=https://app.example.com
-APP_KEY=                        # leave blank, deploy will generate one
-
-CONTAINER_NAME=myapp            # used as container prefix
-SERVER=octane                   # octane | caddy | nginx | fpm | artisan
-DB_DRIVER=mariadb               # mariadb | postgres | pgvector
-SERVICES=redis                  # comma-separated optional services
-
-DOMAIN=app.example.com          # used by Caddy for auto-HTTPS
-BRANCH=main                     # branch to pull on each deploy
-
+APP_KEY=                       # generated by the first deploy
+CONTAINER_NAME=myapp
+SERVER=caddy                   # or octane / nginx
+DOMAIN=app.example.com
+DB_DRIVER=mariadb
+DB_HOST=mariadb
 DB_DATABASE=myapp
 DB_USERNAME=app
-DB_PASSWORD=<strong-password>
-
-# Optional - absolute paths recommended on a real server.
-# Defaults to ./storage and ./db-data inside this directory.
-# STORAGE_MOUNT_PATH=/var/data/myapp/storage
-# DB_MOUNT_PATH=/var/data/myapp/db
+DB_PASSWORD=<long random password>
+SERVICES=redis
+BRANCH=main
+STORAGE_MOUNT_PATH=/srv/data/myapp/storage   # absolute paths recommended
+DB_MOUNT_PATH=/srv/data/myapp/db
 ```
+
+### 3. Deploy
 
 ```bash
-chmod 600 .env
+./dock deploy            # interactive: shows incoming commits, asks to confirm
+./dock deploy -y --backup  # CI / cron: no prompt, dump the DB first
 ```
 
-### 4. Deploy
+What it does:
 
-```bash
-./dock deploy
-```
+1. `git fetch` the `BRANCH`, show commits/files to deploy (and flag new migrations), confirm.
+2. `git pull --ff-only --autostash`, then continue with the freshly pulled `dock`.
+3. Write `USER_ID`/`GROUP_ID` and a missing `APP_KEY` to `.env`, `chmod 600 .env`, fix storage ownership.
+4. Optional `db:dump` (`--backup`), build the image, recreate containers.
+5. Copy built assets to the host (`nginx`/`caddy` serve `public/` from it).
+6. Wait for the DB healthcheck, `migrate --force`, `storage:link`, config/route/view/event caches,
+   `filament:optimize` when present.
+7. Reload the server (opcache never revalidates in production) and `queue:restart`.
 
-That's it. The command will:
-
-1. `git fetch origin <BRANCH>` and show you a **summary** of the new commits, files changed, and config to deploy.
-2. Ask for confirmation.
-3. `git pull --rebase --autostash`.
-4. Generate `APP_KEY` if missing, persist host `USER_ID`/`GROUP_ID` into `.env`.
-5. `chmod`/`chown` storage + db data dirs.
-6. `docker compose build && up -d` the containers.
-7. Wait for the database to be healthy (`pg_isready` for postgres/pgvector).
-8. Run `artisan migrate --force`, `storage:link`, `config/route/view/event:cache`.
-9. `octane:reload` if `SERVER=octane`.
-
-Output preview:
-
-```
-🐳 Deployment
-⚙️ Configuration
-  App           My App
-  Environment   production
-  Server        octane
-  Branch        main
-  Domain        app.example.com
-  ...
-
-📦 Changes
-  From    a1b2c3d
-  To      e4f5g6h
-  Commits 4
-
-  e4f5g6h  Fix billing edge case (Alice)
-  9876543  Add admin dashboard (Bob)
-  ...
-
-Proceed with deployment? [y/N]
-```
-
-### 5. Re-deploy (after every code push)
-
-Identical command:
-
-```bash
-./dock deploy
-```
-
-It's fully idempotent. If there are no new commits, it'll tell you and you can choose to abort or continue (useful to force a rebuild + re-migrate without a code change).
-
-### Flags
-
-| Flag | Effect |
-|---|---|
-| `-y`, `--yes` | Skip the confirmation prompt (for CI/cron) |
-| `--skip-pull` | Don't run `git fetch`/`pull` — deploy whatever is in the working tree |
-| `-v`, `--verbose` | Stream `docker compose` output instead of hiding it |
+It is idempotent: with no new commits it rebuilds and re-runs migrations. It exits non-zero if migrations fail.
 
 ### HTTPS
 
-Use `SERVER=caddy` + `DOMAIN=app.example.com`. Caddy fetches a Let's Encrypt cert automatically on first request. Make sure:
-- DNS for `DOMAIN` resolves to the server's IP.
-- Ports 80 + 443 are open on the firewall.
-- No other webserver is bound to those ports.
+`SERVER=caddy` + `DOMAIN`: certificates are issued on the first request. DNS must point at the server and
+ports 80/443 must be open. Behind another proxy, use `nginx`/`octane` and terminate TLS there.
 
-### Troubleshooting
+### Security notes
 
-| Symptom | Fix |
-|---|---|
-| `Cannot connect to the Docker daemon` | `sudo usermod -aG docker $USER && newgrp docker` |
-| `Permission denied` on `storage/` | Re-run with `sudo` or set storage dir owner to your UID |
-| `git fetch` fails on private repo | Add the server's SSH key as a deploy key (step 1) |
-| Port 80/443 already in use | Stop host webserver (`sudo systemctl stop nginx`) or set `HTTP_PORT`/`HTTPS_PORT` in `.env` |
-| `.env` change not taking effect | `.env` is mounted read-only into the container. Run `./dock restart` (no rebuild needed for env-only changes) |
-| Want to abort after seeing the diff | Just answer `N` to the prompt — nothing has been pulled yet |
+- The app runs as an unprivileged user; supervisor is the only root process.
+- DB, Redis, Mailpit, Meilisearch, phpMyAdmin, Gotenberg and FastCGI are published on `127.0.0.1` only —
+  Docker port publishing bypasses `ufw`, so never set `SERVICES_BIND=0.0.0.0` on a public host. Use an SSH
+  tunnel (`ssh -L 8080:127.0.0.1:8080 server`) for phpMyAdmin.
+- Container logs rotate (3 × 10 MB per container).
+- `./dock doctor` flags common production mistakes (`APP_DEBUG`, default passwords, `.env` permissions).
 
----
+## Updating the toolkit
 
-## Future improvements
-
-These are known gaps tracked for future work (not blocking the current deploy):
-
-### Reliability / safety
-- **Release-based deploy layout** (`releases/`, `shared/`, `current` symlink) for instant rollback.
-- **DB backup before each re-deploy** (`mysqldump` → `${DB_MOUNT_PATH}/../backups/`).
-- **Real healthcheck**: replace `php -v` with `curl -f http://localhost:8000/up`.
-- **`./dock doctor`** subcommand: scan for common misconfig (missing extensions, perms, port conflicts, stale containers).
-
-### Operational
-- **`./dock bootstrap`** subcommand: install Docker + create system user + open firewall ports + systemd unit so the app survives reboots.
-- **`./dock backup` / `./dock restore`**: one-shot DB + storage tarball. Should ideally be runnable as a `--backup` flag of `deploy` to auto-snapshot before each deploy.
-- **`./dock deploy --tag <tag>`**: deploy a specific git tag/sha (currently always pulls the configured `BRANCH`).
-- **systemd integration**: auto-start on boot via a generated `dock-${CONTAINER_NAME}.service`.
-- **Webhook notifications** on deploy success/failure (Slack/Telegram/Discord).
-- **`--dry-run`** flag for `deploy` (show the plan without pulling/building).
-- **Optional pre/post hooks**: `scripts/deploy/before.sh`, `scripts/deploy/after.sh` so apps can plug in extra steps (e.g. flush CDN, warm cache).
-
-### Build / runtime
-- **True PHP-FPM mode**: would require switching the base image away from FrankenPHP (e.g. `php:8.3-fpm`) and re-introducing `php-fpm` as a supervisor program. Only worth doing if you really need classic FPM (e.g. integrating with an existing FPM-only ops stack). The current proxy-to-octane approach is simpler and faster.
-- **Xdebug** install gated by `XDEBUG_MODE` (currently env var is wired but extension not installed).
-- **Multi-arch image builds** (amd64 + arm64) via buildx, with arch-detected octane symlinks (currently both are linked unconditionally).
-- **Scheduler via cron** container instead of `while sleep 60` (drift-free).
-- **Octane installation moved to Dockerfile** so prod doesn't `composer require` at runtime.
-
-### Server compose hygiene
-- **Port-conflict awareness**: extend `check_required_ports` to cover soketi (6001), gotenberg, mailpit SMTP (1025), and 80/443 for caddy.
-- **`docker_exec` argument quoting**: current `$cmd` unquoted, breaks on args with spaces.
-- **phpMyAdmin behind auth** or bind to `127.0.0.1` only when used in non-local environments.
-
-### Developer experience
-- **`./dock update`** to pull + redeploy in one shot with minimal downtime.
-- **`./dock ssl <domain>`** to generate a Caddyfile snippet for a new domain.
-- **VS Code devcontainer config** generated by the installer for one-click attach.
-
----
-
-## How It Works
-
-The CLI dynamically assembles Docker Compose configurations:
-
-```
-base.yml + environment/{local,staging,production}.yml + server/{artisan,octane,...}.yml + services/{redis,mailpit,...}.yml
+```bash
+./dock update --check    # list what changed upstream
+./dock update            # replace dock, scripts/lib, docker/compose, Dockerfile, docker/AGENTS.md
+./dock start --build
 ```
 
-### Project Structure
+`docker/config/*` is never overwritten: new files are added and changed ones are listed for manual merging.
+`DOCK_REPO` / `DOCK_BRANCH` select a fork or branch.
 
-```
-├── dock                    # CLI entrypoint
-├── .env                    # Configuration
-├── docker/
-│   ├── Dockerfile          # Multi-stage build
-│   ├── compose/
-│   │   ├── base.yml        # Core service (app) + app-network
-│   │   ├── environments/   # Environment overrides
-│   │   ├── servers/        # Server-specific configs
-│   │   └── services/       # Optional services
-│   └── config/
-│       ├── php/            # PHP configs per environment
-│       └── supervisor/     # Supervisor configs per environment
-└── scripts/lib/            # Shell libraries
+## How it works
+
+`dock` assembles the compose file list from `.env` (no `docker-compose.yml` in your project):
+
+```text
+docker/compose/base.yml                          app service, network, PHP ini, supervisor
+docker/compose/databases/<DB_DRIVER>.yml         + <DB_DRIVER>-<env>.yml
+docker/compose/environments/<env>.yml            local: whole project mounted; else storage + .env
+docker/compose/servers/<SERVER>.yml              server program + front container
+docker/compose/services/<service>.yml            one per SERVICES entry
 ```
 
-### Environment Optimizations
+The Dockerfile has three targets: `local` (PHP + Node, no code: builds in seconds and never reads the build
+context), `staging` and `production` (vendor and built assets baked in; dev dependencies dropped in
+production; node_modules never shipped). PHP extensions are compiled once in a shared `base` stage.
 
-| Setting | Local | Production |
-|---------|-------|------------|
-| OPcache timestamps | Validated (instant reload) | Disabled (max speed) |
-| JIT | Off | Tracing mode |
-| Octane | `--watch` flag | Persistent workers |
-| Caches | Cleared on start | Baked into image |
-| Code mount | Full project | Storage only |
+```text
+├── dock                     CLI
+├── scripts/lib/             colors, utils, env, checks, docker
+└── docker/
+    ├── Dockerfile
+    ├── AGENTS.md            usage guide for AI coding agents
+    ├── compose/             base, databases, environments, servers, services
+    └── config/              php, supervisor, nginx, caddy, fpm, postgres
+```
 
-## Requirements
+| | Local | Staging | Production |
+|---|---|---|---|
+| Code | bind-mounted | in image | in image |
+| Composer dev deps | yes | yes | no |
+| OPcache timestamps | validated | every 60 s | never (server reloaded on deploy) |
+| JIT | off | function | tracing |
+| Queue | `queue:listen` | `queue:work` ×1 + `schedule:work` | `queue:work` ×2 + `schedule:work` |
 
-- Docker with Compose V2
-- Bash 3.2+ (macOS default works)
+## AI coding agents
+
+Projects get `docker/AGENTS.md`, a compact guide that tells agents (Claude Code, Codex, Cursor, …) to run
+everything through `./dock`, which commands exist and what needs confirmation. The installer links it at
+the top of `AGENTS.md` / `CLAUDE.md`. This repo's own contributor notes are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Troubleshooting
 
-**Port in use:**
+Start with `./dock doctor`.
+
+| Symptom | Fix |
+|---|---|
+| Port already in use | Change `APP_PORT` (or `FORWARD_DB_PORT`, …) in `.env`, `./dock restart` |
+| `Permission denied` in `storage/` | `./dock restart` re-applies ownership; UID mismatch: `./dock start --build` |
+| Container UID ≠ `USER_ID` warning | `./dock start --build` |
+| `.env` change ignored | `./dock restart` (staging/production mount `.env` read-only) |
+| `Cannot connect to the Docker daemon` | `sudo usermod -aG docker $USER && newgrp docker` |
+| `git fetch` fails on deploy | Add the server key as a deploy key |
+| Diverged checkout on deploy | Resolve by hand: deploy only fast-forwards |
+| Production page shows stale code | `./dock deploy --skip-pull -y` |
+| Old setup: DB data in `docker/compose/db-data` | Still used automatically (dock warns); move it to `./db-data` when convenient |
+
+## Contributing
+
 ```bash
-lsof -i :8000              # Find what's using it
-APP_PORT=8080 ./dock start # Use different port
+make lint      # shellcheck + bash -n + compose config for every env/server/db combination
 ```
 
-**Permission issues:**
-```bash
-./dock shell
-chmod -R 775 storage bootstrap/cache
-```
-
-**Code changes not reflecting (production):**
-```bash
-./dock restart
-# Or: ./dock artisan octane:reload
-```
+CI runs the same checks on every push (`.github/workflows/ci.yml`). See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

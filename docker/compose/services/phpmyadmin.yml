@@ -1,21 +1,27 @@
 # =============================================================================
-# phpMyAdmin Service
-# Web-based database management tool
+# phpMyAdmin (DB_DRIVER=mariadb only). Auto-logs in with the app credentials,
+# so it is bound to SERVICES_BIND (127.0.0.1): reach it via an SSH tunnel.
 # =============================================================================
 
 services:
   phpmyadmin:
     container_name: '${CONTAINER_NAME}-phpmyadmin'
-    image: phpmyadmin/phpmyadmin:latest
+    image: 'phpmyadmin:${PHPMYADMIN_VERSION:-5.2}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${PHPMYADMIN_PORT:-8080}:80'
+      - '${SERVICES_BIND:-127.0.0.1}:${PHPMYADMIN_PORT:-8080}:80'
     environment:
       PMA_HOST: mariadb
       PMA_PORT: 3306
       PMA_USER: '${DB_USERNAME}'
       PMA_PASSWORD: '${DB_PASSWORD}'
+      UPLOAD_LIMIT: 128M
     networks:
       - app-network
     depends_on:
       - mariadb
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

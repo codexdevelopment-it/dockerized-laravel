@@ -1,18 +1,17 @@
 # =============================================================================
-# Mailpit Service
-# Email testing tool (catches all outgoing mail)
+# Mailpit: catches all outgoing mail. UI on MAILPIT_UI_PORT (default 8025).
 # =============================================================================
 
 services:
   mailpit:
     container_name: '${CONTAINER_NAME}-mailpit'
-    image: axllent/mailpit
+    image: 'axllent/mailpit:${MAILPIT_VERSION:-v1.31}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${MAILPIT_UI_PORT:-8025}:8025'   # Web UI
-      - '${MAILPIT_SMTP_PORT:-1025}:1025' # SMTP
+      - '${SERVICES_BIND:-127.0.0.1}:${MAILPIT_UI_PORT:-8025}:8025'
+      - '${SERVICES_BIND:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025'
     environment:
-      MP_MAX_MESSAGES: 100
+      MP_MAX_MESSAGES: 500
       MP_DATABASE: /data/mailpit.db
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
@@ -20,7 +19,11 @@ services:
       - mailpit-data:/data
     networks:
       - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
 
 volumes:
   mailpit-data:
-    driver: local

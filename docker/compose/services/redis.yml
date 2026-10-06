@@ -1,15 +1,15 @@
 # =============================================================================
-# Redis Service
-# In-memory data store for caching and queues
+# Redis: cache, sessions, queues. Host port bound to SERVICES_BIND (127.0.0.1).
+# FORWARD_REDIS_PORT only changes the host side; the app keeps redis:6379.
 # =============================================================================
 
 services:
   redis:
     container_name: '${CONTAINER_NAME}-redis'
-    image: redis:7-alpine
+    image: 'redis:${REDIS_VERSION:-8-alpine}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${REDIS_PORT:-6379}:6379'
+      - '${SERVICES_BIND:-127.0.0.1}:${FORWARD_REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     networks:
@@ -19,7 +19,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
 
 volumes:
   redis-data:
-    driver: local

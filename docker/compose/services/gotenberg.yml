@@ -1,14 +1,18 @@
 # =============================================================================
-# Gotenberg Service
-# PDF generation from HTML, URLs, and documents
+# Gotenberg: HTML/Office to PDF. Reach it from the app at http://gotenberg:3000.
 # =============================================================================
 
 services:
   gotenberg:
     container_name: '${CONTAINER_NAME}-gotenberg'
-    image: gotenberg/gotenberg:8
+    image: 'gotenberg/gotenberg:${GOTENBERG_VERSION:-8}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${GOTENBERG_PORT:-3000}:3000'
+      - '${SERVICES_BIND:-127.0.0.1}:${GOTENBERG_PORT:-3000}:3000'
     networks:
       - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

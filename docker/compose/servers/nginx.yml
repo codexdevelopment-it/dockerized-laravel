@@ -1,32 +1,35 @@
 # =============================================================================
-# Nginx + PHP-FPM
-# Nginx serves static files + proxies PHP to php-fpm on app:9000 via FastCGI.
+# nginx: serves static files and proxies PHP to php-fpm on app:9000.
 # =============================================================================
 
 services:
   app:
-    # App runs php-fpm via supervisor (no port published; nginx talks over the
-    # docker network on port 9000).
     volumes:
       - '../config/supervisor/server-fpm.conf:/etc/supervisor/programs/20-server.conf:ro'
 
   nginx:
     container_name: '${CONTAINER_NAME}-nginx'
-    image: nginx:alpine
+    image: 'nginx:${NGINX_VERSION:-stable-alpine}'
     restart: '${RESTART_POLICY:-no}'
     ports:
       - '${APP_PORT:-8000}:80'
     volumes:
       - '../config/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro'
-      # Nginx needs the same code path as app to resolve SCRIPT_FILENAME
-      - '../../:/var/www/html:ro'
-      - '${STORAGE_MOUNT_PATH:-../../storage}:/var/www/html/storage:ro'
+      # Same code path as app so SCRIPT_FILENAME resolves; public/build is
+      # synced to the host by `dock deploy`.
+      - '../../public:/var/www/html/public:ro'
+      - '${STORAGE_MOUNT_PATH}:/var/www/html/storage:ro'
     depends_on:
       - app
     networks:
       - app-network
     healthcheck:
-      test: ['CMD-SHELL', 'nc -z localhost 80 || exit 1']
+      test: ['CMD-SHELL', 'nc -z 127.0.0.1 80']
       interval: 30s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

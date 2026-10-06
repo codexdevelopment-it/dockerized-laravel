@@ -24,3 +24,5 @@ Homestead.json
 .DS_Store
 /.idea/
 /.claude
+/db-data/
+/backups/

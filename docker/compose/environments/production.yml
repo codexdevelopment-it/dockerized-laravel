@@ -1,29 +1,14 @@
 # =============================================================================
-# Production Environment
-# Optimized for performance and security
+# Production: code baked into the image; only storage/ and .env are mounted.
 # =============================================================================
 
 services:
-  # ---------------------------------------------------------------------------
-  # Application - Production Overrides
-  # ---------------------------------------------------------------------------
   app:
     volumes:
-      # Only mount storage directory (code is baked into image)
-      - '${STORAGE_MOUNT_PATH:-./storage}:/var/www/html/storage'
-      # Mount .env so credentials can change without rebuild
+      - '${STORAGE_MOUNT_PATH}:/var/www/html/storage'
+      # Mounted so credentials can change without a rebuild (`./dock restart`).
       - '../../.env:/var/www/html/.env:ro'
-      # Environment-specific PHP configuration
-      - '../config/php/base.ini:/usr/local/etc/php/conf.d/00-base.ini:ro'
-      - '../config/php/production.ini:/usr/local/etc/php/conf.d/01-environment.ini:ro'
-      # Supervisor: base + per-env workers. Server program is mounted by the
-      # server compose file (servers/*.yml).
-      - '../config/supervisor/base.conf:/etc/supervisor/conf.d/00-base.conf:ro'
-      - '../config/supervisor/workers-production.conf:/etc/supervisor/programs/10-workers.conf:ro'
     deploy:
       resources:
         limits:
-          memory: 512M
-        reservations:
-          memory: 256M
-
+          memory: '${APP_MEMORY_LIMIT:-1G}'

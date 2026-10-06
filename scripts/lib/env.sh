@@ -1,241 +1,198 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Environment loading and validation utilities
+# .env loading, validation and the derived variables compose files rely on.
 # =============================================================================
 
-# Prevent double-sourcing
 [[ -n "${_ENV_LOADED:-}" ]] && return 0
 _ENV_LOADED=1
 
-# Source dependencies
 SCRIPT_LIB_DIR="${SCRIPT_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "${SCRIPT_LIB_DIR}/colors.sh"
+source "${SCRIPT_LIB_DIR}/utils.sh"
+
+VALID_ENVS="local development staging production"
+VALID_SERVERS="artisan octane fpm nginx caddy"
+VALID_DB_DRIVERS="mariadb postgres pgvector"
 
 # -----------------------------------------------------------------------------
-# Environment Loading
+# Loading
 # -----------------------------------------------------------------------------
 
-# Load environment variables from a file
-# Usage: load_env [path_to_env_file]
+# load_env <file>: export every KEY=VALUE of a dotenv file.
+# Variables already set in the shell win (like docker compose and phpdotenv),
+# so `APP_PORT=8080 ./dock start` works. Supports `export KEY=`, single/double
+# quotes and trailing ` # comments` on unquoted values.
 load_env() {
-    local env_file="${1:-.env}"
-    
+    local env_file="${1:-.env}" line key value
+
     if [[ ! -f "$env_file" ]]; then
         print_error "Environment file not found: ${env_file}"
         return 1
     fi
-    
-    print_verbose "Loading environment from: ${env_file}"
-    
-    # Export variables from .env file
-    # Read line by line to handle comments and empty lines
+    print_verbose "Loading environment from ${env_file}"
+
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip empty lines and comments
-        [[ -z "$line" ]] && continue
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        
-        # Only process lines that look like VAR=value
-        if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            local var_name="${BASH_REMATCH[1]}"
-            local var_value="${BASH_REMATCH[2]}"
-            
-            # Remove surrounding quotes if present
-            var_value="${var_value#\"}"
-            var_value="${var_value%\"}"
-            var_value="${var_value#\'}"
-            var_value="${var_value%\'}"
-            
-            # Export the variable
-            export "$var_name=$var_value"
+        line="${line%$'\r'}"
+        [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        key="${BASH_REMATCH[2]}"
+        value="${BASH_REMATCH[3]}"
+
+        if [[ "$value" =~ ^\"(.*)\"[[:space:]]*(#.*)?$ ]]; then
+            value="${BASH_REMATCH[1]}"
+        elif [[ "$value" =~ ^\'(.*)\'[[:space:]]*(#.*)?$ ]]; then
+            value="${BASH_REMATCH[1]}"
+        else
+            value="${value%%[[:space:]]#*}"
+            value="${value%"${value##*[![:space:]]}"}"
         fi
+
+        [[ -n "${!key+x}" ]] && continue
+        export "${key}=${value}"
     done < "$env_file"
-    
-    return 0
-}
-
-# Get the project root directory (where .env lives)
-get_project_root() {
-    local current_dir
-    current_dir="$(pwd)"
-    
-    # Walk up the directory tree looking for .env
-    while [[ "$current_dir" != "/" ]]; do
-        if [[ -f "${current_dir}/.env" ]] && [[ -d "${current_dir}/docker" ]]; then
-            echo "$current_dir"
-            return 0
-        fi
-        current_dir="$(dirname "$current_dir")"
-    done
-    
-    # Fallback to current directory
-    echo "$(pwd)"
 }
 
 # -----------------------------------------------------------------------------
-# Environment Validation
+# Helpers
 # -----------------------------------------------------------------------------
 
-# Required environment variables for different operations
-readonly REQUIRED_VARS_START="CONTAINER_NAME APP_ENV SERVER"
-# Deploy runs from a cloned repo; REPO_URL/BRANCH/DEPLOY_DIR are no longer needed.
-readonly REQUIRED_VARS_DEPLOY="DB_DATABASE DB_USERNAME DB_PASSWORD"
+is_local_env()      { [[ "${APP_ENV:-local}" == "local" || "${APP_ENV:-local}" == "development" ]]; }
+is_production_env() { [[ "${APP_ENV:-local}" == "production" ]]; }
 
-# Validate that required environment variables are set
-# Usage: validate_env <operation>
-validate_env() {
-    local operation="${1:-start}"
-    local required_vars
-    local missing_vars=()
-
-    case "$operation" in
-        start)  required_vars=$REQUIRED_VARS_START ;;
-        deploy) required_vars="$REQUIRED_VARS_START $REQUIRED_VARS_DEPLOY" ;;
-        *)      required_vars=$REQUIRED_VARS_START ;;
-    esac
-    
-    for var in $required_vars; do
-        if [[ -z "${!var:-}" ]]; then
-            missing_vars+=("$var")
-        fi
-    done
-    
-    if [[ ${#missing_vars[@]} -gt 0 ]]; then
-        print_error "Missing required environment variables:"
-        for var in "${missing_vars[@]}"; do
-            echo "  - $var" >&2
-        done
-        return 1
-    fi
-    
-    return 0
-}
-
-# Validate APP_ENV value
-validate_app_env() {
-    local env="${APP_ENV:-local}"
-    
-    case "$env" in
-        local|development|staging|production)
-            return 0
-            ;;
-        *)
-            print_error "Invalid APP_ENV value: ${env}"
-            print_info "Valid values: local, development, staging, production"
-            return 1
-            ;;
+# local | staging | production: selects compose overrides, PHP ini, workers,
+# and the Dockerfile target.
+get_env_compose_file() {
+    case "${APP_ENV:-local}" in
+        staging)    echo "staging" ;;
+        production) echo "production" ;;
+        *)          echo "local" ;;
     esac
 }
 
-# Validate SERVER value
-validate_server() {
-    local server="${SERVER:-artisan}"
-    local valid_servers="artisan octane fpm nginx caddy"
-
-    if [[ ! " $valid_servers " =~ " $server " ]]; then
-        print_error "Invalid SERVER value: ${server}"
-        print_info "Valid values: ${valid_servers}"
-        return 1
-    fi
-
-    return 0
-}
-
-# Validate DB_DRIVER value
-validate_db_driver() {
+get_db_driver() {
     local driver="${DB_DRIVER:-mariadb}"
     [[ "$driver" == "postgresql" ]] && driver="postgres"
+    echo "$driver"
+}
 
-    case "$driver" in
-        mariadb|postgres|pgvector) return 0 ;;
+is_postgres_driver() { [[ "$(get_db_driver)" == "postgres" || "$(get_db_driver)" == "pgvector" ]]; }
+
+# SERVICES="redis, mailpit" -> "redis mailpit"
+parse_services() {
+    local s="${SERVICES:-}"
+    s="${s//,/ }"
+    # shellcheck disable=SC2086  # unquoted on purpose: collapses whitespace
+    echo $s
+}
+
+has_service() { [[ " $(parse_services) " == *" $1 "* ]]; }
+
+# resolve_mount_path <value> <default>: absolute host path for a bind mount.
+# Relative paths are relative to the project root. Compose would resolve them
+# from docker/compose/, which earlier versions accidentally did: if data only
+# exists at that legacy location, keep using it and say so.
+resolve_mount_path() {
+    local value="${1:-$2}" target legacy
+    target="$(abs_path "$value" "$PROJECT_ROOT")"
+    case "$value" in
+        /*|"~"/*) ;;
         *)
-            print_error "Invalid DB_DRIVER value: ${driver}"
-            print_info "Valid values: mariadb, postgres, pgvector"
-            return 1
+            legacy="$(abs_path "$value" "${PROJECT_ROOT}/docker/compose")"
+            if [[ ! -e "$target" && -d "$legacy" && -n "$(ls -A "$legacy" 2>/dev/null)" ]]; then
+                print_warning "Using legacy data dir ${legacy#"${PROJECT_ROOT}"/} (move it to ${value} when convenient)"
+                target="$legacy"
+            fi
             ;;
     esac
+    printf '%s' "$target"
 }
 
-# Full environment validation
-validate_full_env() {
-    local operation="${1:-start}"
-    local errors=0
+# Export everything compose files expect. Idempotent.
+prepare_compose_env() {
+    DOCK_ENV="$(get_env_compose_file)"
+    DB_DRIVER="$(get_db_driver)"
 
-    validate_env "$operation" || ((errors++))
-    validate_app_env || ((errors++))
-    validate_server || ((errors++))
-    validate_db_driver || ((errors++))
+    if is_local_env; then RESTART_POLICY="no"; else RESTART_POLICY="unless-stopped"; fi
 
-    return $errors
-}
+    # Container user mirrors the host user so bind-mounted files keep their
+    # owner. Never root: fall back to 1000.
+    USER_ID="${USER_ID:-$(id -u)}"
+    GROUP_ID="${GROUP_ID:-$(id -g)}"
+    [[ "$USER_ID" == "0" ]] && USER_ID=1000
+    [[ "$GROUP_ID" == "0" ]] && GROUP_ID=1000
 
-# -----------------------------------------------------------------------------
-# Environment Helpers
-# -----------------------------------------------------------------------------
+    STORAGE_MOUNT_PATH="$(resolve_mount_path "${STORAGE_MOUNT_PATH:-}" storage)"
+    DB_MOUNT_PATH="$(resolve_mount_path "${DB_MOUNT_PATH:-}" db-data)"
 
-# Check if we're in a local/development environment
-is_local_env() {
-    [[ "${APP_ENV:-local}" == "local" ]] || [[ "${APP_ENV:-local}" == "development" ]]
-}
-
-# Check if we're in a production environment
-is_production_env() {
-    [[ "${APP_ENV:-local}" == "production" ]]
-}
-
-# Check if we're in a staging environment
-is_staging_env() {
-    [[ "${APP_ENV:-local}" == "staging" ]]
-}
-
-# Get the restart policy based on environment
-get_restart_policy() {
-    if is_local_env; then
-        echo "no"
+    # FrankenPHP is only baked into octane images; the tag differs so switching
+    # SERVER triggers a build instead of reusing an image without the binary.
+    if [[ "${SERVER:-artisan}" == "octane" ]]; then
+        DOCK_WITH_FRANKENPHP=1 DOCK_IMAGE_SUFFIX="-octane"
     else
-        echo "always"
+        DOCK_WITH_FRANKENPHP=0 DOCK_IMAGE_SUFFIX=""
     fi
+
+    export DOCK_ENV DB_DRIVER RESTART_POLICY USER_ID GROUP_ID \
+        STORAGE_MOUNT_PATH DB_MOUNT_PATH DOCK_WITH_FRANKENPHP DOCK_IMAGE_SUFFIX
 }
 
-# Get the environment file for compose (local, staging, or production)
-get_env_compose_file() {
-    local env="${APP_ENV:-local}"
-    
-    case "$env" in
-        local|development) echo "local" ;;
-        staging)           echo "staging" ;;
-        production)        echo "production" ;;
-        *)                 echo "local" ;;
-    esac
-}
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
 
-# Convert SERVICES comma-separated string to array
-parse_services() {
-    local services_str="${SERVICES:-}"
-    
-    if [[ -z "$services_str" ]]; then
-        echo ""
-        return 0
+_in_list() { [[ " $2 " == *" $1 "* ]]; }
+
+# validate_full_env [start|deploy]
+validate_full_env() {
+    local operation="${1:-start}" errors=0 var required="CONTAINER_NAME APP_ENV SERVER"
+    [[ "$operation" == "deploy" ]] && required="$required DB_DATABASE DB_USERNAME DB_PASSWORD"
+
+    for var in $required; do
+        if [[ -z "${!var:-}" ]]; then
+            print_error "Missing required .env variable: ${var}"
+            errors=$((errors + 1))
+        fi
+    done
+
+    if [[ "${CONTAINER_NAME:-}" == *"{{"* ]]; then
+        print_error "CONTAINER_NAME still holds the installer placeholder: ${CONTAINER_NAME}"
+        errors=$((errors + 1))
+    elif [[ -n "${CONTAINER_NAME:-}" && ! "$CONTAINER_NAME" =~ ^[a-z0-9][a-z0-9_.-]+$ ]]; then
+        print_error "CONTAINER_NAME must be 2+ chars, lowercase letters, digits, '-', '_' or '.'"
+        errors=$((errors + 1))
     fi
-    
-    # Convert comma-separated to space-separated
-    echo "${services_str//,/ }"
+    if ! _in_list "${APP_ENV:-local}" "$VALID_ENVS"; then
+        print_error "Invalid APP_ENV '${APP_ENV}'. Valid: ${VALID_ENVS}"
+        errors=$((errors + 1))
+    fi
+    if ! _in_list "${SERVER:-artisan}" "$VALID_SERVERS"; then
+        print_error "Invalid SERVER '${SERVER}'. Valid: ${VALID_SERVERS}"
+        errors=$((errors + 1))
+    fi
+    if ! _in_list "$(get_db_driver)" "$VALID_DB_DRIVERS"; then
+        print_error "Invalid DB_DRIVER '${DB_DRIVER}'. Valid: ${VALID_DB_DRIVERS}"
+        errors=$((errors + 1))
+    fi
+    if has_service phpmyadmin && is_postgres_driver; then
+        print_error "phpmyadmin only works with DB_DRIVER=mariadb (remove it from SERVICES)"
+        errors=$((errors + 1))
+    fi
+    if [[ "${SERVER:-}" == "artisan" ]] && ! is_local_env; then
+        print_warning "SERVER=artisan is a development server; use octane, nginx or caddy in ${APP_ENV}"
+    fi
+    if ! is_local_env && [[ "${APP_DEBUG:-false}" == "true" ]]; then
+        print_warning "APP_DEBUG=true in ${APP_ENV}: stack traces and env values are exposed to visitors"
+    fi
+    if [[ "$operation" == "deploy" && "${DB_PASSWORD:-}" == "password" ]]; then
+        print_warning "DB_PASSWORD is still the template default 'password'"
+    fi
+
+    return "$errors"
 }
 
-# Print environment summary
+# One line under the header: env · server · db · services · container
 print_env_summary() {
-    local services
-    services=$(parse_services)
-    
-    print_section "${ICON_GEAR} Configuration"
-    print_kv "Environment" "${APP_ENV:-local}"
-    print_kv "Server" "${SERVER:-artisan}"
-    print_kv "Database" "${DB_DRIVER:-mariadb}"
-    print_kv "Container" "${CONTAINER_NAME:-unknown}"
-    print_kv "Port" "${APP_PORT:-8000}"
-    
-    if [[ -n "$services" ]]; then
-        print_kv "Services" "$services"
-    fi
-    
-    print_nl
+    _is_quiet && return 0
+    local sep="${DIM} · ${NC}" services=""
+    [[ -n "$(parse_services)" ]] && services="${sep}${CYAN}$(parse_services | sed 's/ /, /g')${NC}"
+    echo -e "  ${BOLD}${APP_ENV:-local}${NC}${sep}${SERVER:-artisan}${sep}$(get_db_driver)${services}${sep}${DIM}${CONTAINER_NAME}${NC}"
 }

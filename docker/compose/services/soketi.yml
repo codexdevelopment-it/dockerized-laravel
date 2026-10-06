@@ -1,18 +1,23 @@
 # =============================================================================
-# Soketi Service
-# Open-source WebSocket server (Pusher-compatible)
+# Soketi: Pusher-compatible WebSocket server. Browsers connect to it, so the
+# port is public by default (SOKETI_BIND). Change the default credentials.
 # =============================================================================
 
 services:
   soketi:
     container_name: '${CONTAINER_NAME}-soketi'
-    image: 'quay.io/soketi/soketi:latest-16-alpine'
+    image: 'quay.io/soketi/soketi:${SOKETI_VERSION:-latest-16-alpine}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${SOKETI_PORT:-6001}:6001'
+      - '${SOKETI_BIND:-0.0.0.0}:${SOKETI_PORT:-6001}:6001'
     environment:
       - SOKETI_DEFAULT_APP_ID=${PUSHER_APP_ID:-some-id}
       - SOKETI_DEFAULT_APP_KEY=${PUSHER_APP_KEY:-app-key}
       - SOKETI_DEFAULT_APP_SECRET=${PUSHER_APP_SECRET:-some-app-secret}
     networks:
       - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

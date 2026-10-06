@@ -1,6 +1,5 @@
 # =============================================================================
-# PostgreSQL + pgvector — production overrides
-# No port exposure. Memory limits tuned for a typical VPS.
+# pgvector, production: no published port, memory limit for a typical VPS.
 # =============================================================================
 
 services:
@@ -8,6 +7,4 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-        reservations:
-          memory: 512M
+          memory: '${DB_MEMORY_LIMIT:-1G}'

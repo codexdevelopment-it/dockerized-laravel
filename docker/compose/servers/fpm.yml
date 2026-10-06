@@ -1,14 +1,12 @@
 # =============================================================================
-# PHP-FPM standalone
-# Runs php-fpm on port 9000 inside the app container. No web server in front.
-# You'll need to add your own (nginx/caddy on the host, or use SERVER=nginx
-# / SERVER=caddy to get them as docker services).
+# fpm: php-fpm only, FastCGI on APP_PORT. Bring your own web server.
+# Published on SERVICES_BIND (default 127.0.0.1): an exposed FastCGI port
+# lets anyone execute PHP, so never bind it to 0.0.0.0 on a public host.
 # =============================================================================
 
 services:
   app:
-    # Expose FPM port if user wants to point an external nginx/caddy at it
     ports:
-      - '${APP_PORT:-9000}:9000'
+      - '${SERVICES_BIND:-127.0.0.1}:${APP_PORT:-9000}:9000'
     volumes:
       - '../config/supervisor/server-fpm.conf:/etc/supervisor/programs/20-server.conf:ro'

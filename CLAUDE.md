@@ -1,134 +1,88 @@
-# Dockerized Laravel — Context for Claude
+# Dockerized Laravel — contributor notes for Claude
 
 ## What this is
 
-A self-contained Docker toolkit you drop into any Laravel project. After running `configure-app.sh` (or `./dock install`), the target project gets a `dock` CLI, a `docker/` config tree, and a `scripts/` lib — everything needed to start, develop, and deploy without touching the host machine.
+A Docker toolkit dropped into Laravel projects. `configure-app.sh` copies `dock`, `scripts/lib/` and
+`docker/` into the target project and merges dock settings into its `.env`. The target project then uses
+`./dock` for everything (dev, deploy). `docker/AGENTS.md` is the *user-facing* agent guide shipped to
+projects; this file is for working on the toolkit itself.
 
-Repo: `https://github.com/Murkrow02/dockerized-laravel` (also mirrored at `codexdevelopment-it`)
+Repo: `https://github.com/Murkrow02/dockerized-laravel` (mirror: `codexdevelopment-it`). The installer and
+`dock update` default to Murkrow02 (`DOCKERIZED_LARAVEL_REPO`, `DOCK_REPO` override).
 
-## Project layout
+## Layout
 
 ```
-dock                     Main CLI entry point (single bash file, ~880 lines)
-configure-app.sh         One-shot installer: clones this repo into a target project
-scripts/
-  lib/
-    colors.sh            ANSI color vars + icon constants
-    utils.sh             Spinner, confirm(), prompt(), safe_sed(), string helpers
-    env.sh               load_env(), validate_full_env(), parse_services(), get_env_compose_file()
-    checks.sh            run_preflight_checks(), port checks, compose file checks, octane check
-    docker.sh            build_compose_args(), docker_up/down/restart/logs/exec/status
+dock                     CLI (single bash file): arg parsing, commands, deploy, doctor, update
+configure-app.sh         installer (new + existing projects), standalone (no lib sourcing)
+.env                     template copied by the installer ({{APP_NAME}}, {{CONTAINER_NAME}}, {{DB_NAME}}, {{DB_PASSWORD}})
+scripts/lib/
+  colors.sh              colors (NO_COLOR aware), print_* helpers
+  utils.sh               confirm, safe_sed, set_env_value/get_env_value, abs_path, random_base64
+  env.sh                 load_env, validate_full_env, prepare_compose_env, parse_services, resolve_mount_path
+  checks.sh              check_docker, port checks, run_preflight_checks
+  ui.sh                  run_step (numbered steps, spinner, log capture), step_note, print_box, fmt_duration
+  docker.sh              build_compose_args/compose, app_exec/app_run/app_try, reload_app_server, app_url
+scripts/dev/             toolkit-only dev tools (not copied into projects)
 docker/
-  Dockerfile             Multi-stage: builder (composer install + copy) → runtime (php:8.3-fpm-bookworm)
-  compose/
-    base.yml             app service + app-network (no DB service here)
-    databases/           <driver>.yml + <driver>-{local,staging,production}.yml
-                         for driver in: mariadb  postgres  pgvector
-    environments/        local.yml  staging.yml  production.yml
-    servers/             artisan.yml  fpm.yml  nginx.yml  caddy.yml  octane.yml
-    services/            redis.yml  mailpit.yml  meilisearch.yml  phpmyadmin.yml  soketi.yml  gotenberg.yml
-  config/
-    php/                 base.ini  local.ini  staging.ini  production.ini
-    postgres/            pgvector-init.sql (docker-entrypoint-initdb.d, DB_DRIVER=pgvector)
-    supervisor/          base.conf (include glob)  server-*.conf  workers-*.conf
-    nginx/               default.conf
-    caddy/               Caddyfile
-    fpm/                 pool.conf
+  Dockerfile             targets: local | staging | production (see header)
+  AGENTS.md              shipped agent guide
+  compose/               base.yml, databases/, environments/, servers/, services/
+  config/                php, supervisor, nginx, caddy, fpm, postgres (user-customisable)
 ```
 
-## How the modular compose system works
+## Invariants (don't break these)
 
-`build_compose_args()` in `docker.sh` assembles a `_COMPOSE_ARGS` array (no `eval`):
-1. `docker/compose/base.yml`
-2. `docker/compose/databases/<DB_DRIVER>.yml`          (mariadb | postgres | pgvector)
-3. `docker/compose/databases/<DB_DRIVER>-<env>.yml`    (e.g. mariadb-local.yml — optional)
-4. `docker/compose/environments/<APP_ENV>.yml`          (local | staging | production)
-5. `docker/compose/servers/<SERVER>.yml`                (artisan | fpm | nginx | caddy | octane)
-6. One file per entry in `SERVICES=redis,mailpit,...`
+- **bash 3.2 compatible** (macOS): no associative arrays, `${var,,}`, `mapfile`, `source <(...)`.
+- **No `set -e` in `dock`/libs**; explicit `|| return 1`. `configure-app.sh` uses `set -eu`, so never use
+  `((x++))` there (exits on bash ≥4 when x is 0) — use `x=$((x + 1))`.
+- **No eval / string commands** for compose: `_COMPOSE_ARGS` array only.
+- **Compose relative paths resolve from `docker/compose/`**, not the project root. Host paths from `.env`
+  (`STORAGE_MOUNT_PATH`, `DB_MOUNT_PATH`) are made absolute by `prepare_compose_env`; compose files use
+  them without defaults. Any new host-path variable must go through `resolve_mount_path`.
+- Compose files only read variables `dock` exports. Derived ones come from `prepare_compose_env`:
+  `DOCK_ENV` (local|staging|production, normalises `development`), `RESTART_POLICY`, `USER_ID`/`GROUP_ID`
+  (host IDs, never 0), `DOCK_WITH_FRANKENPHP`, `DOCK_IMAGE_SUFFIX`. Use `DOCK_ENV`, not `APP_ENV`, to pick files.
+- Container commands run as `laravel` (`app_exec`/`app_run`); root only for chown/supervisorctl
+  (`--root`). Running artisan as root creates root-owned logs/caches the app can't write.
+- `app_exec` adds `-t` only when stdin and stdout are TTYs.
+- Long operations go through `run_step "<label>" <cmd>` after `steps_begin <total>` (compute the total
+  up front, see `start_stack_steps`). The command runs in the current shell (exports survive) with
+  stdout/stderr captured and stdin from /dev/null, so nothing inside a step may prompt. Inside a step,
+  `step_note`, `print_warning` and `print_error` lines are re-shown under the result; everything else
+  only appears on failure or with `-v`.
+- Passthrough commands (artisan, composer, npm, php, exec, ...) receive args verbatim: global flags are only
+  parsed before the command, or after it for dock's own commands (`PASSTHROUGH_COMMANDS` in `dock`).
+- `load_env`: shell environment wins over `.env`. Code that changes `.env` mid-run must also `export`.
+- Host ports of auxiliary services bind to `${SERVICES_BIND:-127.0.0.1}`. Only the app/web ports and
+  Soketi are public. `FORWARD_*` vars change the host side only.
+- Database images stay pinned to a major/LTS line (data dirs are major-locked). Pgvector keeps service
+  name `postgres`; `pgvector` must be recognised wherever `postgres` is (`is_postgres_driver`).
+- `docker/config/*` belongs to the user after install: `dock update` never overwrites it.
 
-Everything is driven by `.env`. No separate `docker-compose.yml` lives in the project root.
+## Dockerfile
 
-### Database architecture
+`base` (PHP + extensions + composer + supervisor) → `app-base` (laravel user, optional FrankenPHP) →
+`local` (+ Node) / `release` (code from `builder`) → `staging`, `production`. `builder` does composer
+(no-dev in production), `package:discover` (bootstrap/cache from the host is ignored), npm build, drops
+node_modules. Only `view:cache` at build time: config/route/event caches need the real `.env` (APP_KEY
+affects Livewire's route prefix) and are built by `dock deploy`, which then reloads the server because
+production opcache never revalidates.
 
-MariaDB, PostgreSQL and pgvector each have a base file (`databases/<driver>.yml`) plus env-specific overrides (`databases/<driver>-local.yml` / `-staging.yml` / `-production.yml`). The env files (`environments/`) contain only app-service overrides — no DB config. This means adding a new DB or new env variant only requires a new file in `databases/`, not touching the env files.
+## Runtime
 
-All three DB services use container name `${CONTAINER_NAME}-db` and join `app-network`.
+Supervisor (`docker/config/supervisor/base.conf`) includes `/etc/supervisor/programs/*.conf`:
+`10-workers.conf` (workers-<env>.conf) and `20-server.conf` (server-artisan / server-fpm /
+server-octane-<env>). Program names used by dock: `artisan-serve`, `php-fpm`, `octane`. The app
+healthcheck is `supervisorctl status`. After provisioning, `dock start` runs `supervisorctl start all`
+to revive programs that went FATAL while `vendor/` was missing.
 
-Image tags are pinned to a minor/LTS line and overridable via `.env`: `mariadb:${MARIADB_VERSION:-11.4}`, `postgres:${POSTGRES_VERSION:-16.15}-alpine`, `pgvector/pgvector:${PGVECTOR_VERSION:-0.8.6-pg17}`. Pinning stops silent image bumps on `dock deploy --build` from rewriting the major-locked data dir (irreversible) and keeps local/staging/production identical. Same-major bumps are safe in place; major bumps need `pg_upgrade` or dump/restore.
+FrankenPHP's static binary embeds its own PHP and only reads `/etc/frankenphp/php.d/*.ini`;
+`servers/octane.yml` mounts the PHP inis there too.
 
-- `postgres` → plain `postgres:16.15-alpine` (no build, no vector extension).
-- `pgvector` → `pgvector/pgvector:0.8.6-pg17`; service/host name stays `postgres` so only the image differs. `docker/config/postgres/pgvector-init.sql` runs `CREATE EXTENSION IF NOT EXISTS vector` on a fresh data dir.
-- The `pgvector` name is matched literally: `validate_db_driver` (env.sh), the local-port default (checks.sh) and the deploy DB-wait (`dock`, uses `pg_isready`) all recognise it alongside `postgres`.
+## Testing changes
 
-## Key .env variables
-
-| Variable | Purpose |
-|---|---|
-| `CONTAINER_NAME` | Prefix for all containers (`myapp`, `myapp-db`, ...) |
-| `APP_ENV` | `local` / `staging` / `production` — picks env compose + PHP ini |
-| `DB_DRIVER` | `mariadb` (default), `postgres`, or `pgvector` — picks database compose file |
-| `SERVER` | Which server compose to load |
-| `SERVICES` | Comma-separated optional services |
-| `APP_PORT` | Host port mapped to container :8000 |
-| `DOMAIN` | Used by Caddy for automatic HTTPS |
-| `STORAGE_MOUNT_PATH` | Host path mounted as `/var/www/html/storage` in prod/staging |
-| `DB_MOUNT_PATH` | Host path for database data in prod/staging |
-| `USER_ID` / `GROUP_ID` | Build args for container user, auto-detected by `dock deploy` |
-
-## Dockerfile design
-
-- **Builder stage**: `php:8.3-fpm-bookworm`, installs Composer deps (no-dev in prod), runs `COPY . .`
-- **Runtime stage**: same base, adds supervisor, PHP extensions (pdo_mysql, pdo_pgsql, gd, redis, opcache, pcntl, ...), FrankenPHP binary (always installed, ~30 MB), creates `laravel` user matching host UID/GID
-- Build arg `BUILD_ENV` controls `--no-dev` and whether caches are baked in at build time
-- `.dockerignore` is critical — without it, `COPY . .` clobbers the freshly-installed vendor/
-
-## Server types
-
-| SERVER | How it works |
-|---|---|
-| `artisan` | `docker exec ... php artisan serve` (started in `cmd_start`, interactive) |
-| `octane` | FrankenPHP via supervisor, `server-octane-<env>.conf`. FrankenPHP's embedded PHP ignores `/usr/local/etc/php/conf.d`; `octane.yml` mounts the tuning inis into `/etc/frankenphp/php.d/` (its scan dir) instead. |
-| `fpm` | php-fpm only, no reverse proxy |
-| `nginx` | nginx:alpine + php-fpm on app:9000 |
-| `caddy` | caddy:alpine + php-fpm, auto HTTPS via DOMAIN |
-
-## Environment differences
-
-- **local**: entire project volume-mounted (`../../:/var/www/html`), DB port exposed, `optimize:clear` on start
-- **staging / production**: only `storage/` and `.env` mounted, code baked in image, opcache with `validate_timestamps=0`
-
-## PHP config (`docker/config/php/`)
-
-`base.ini` + `<env>.ini` (directives only — no `extension=` lines). Mounted into
-`/usr/local/etc/php/conf.d/` for php-fpm / php-cli by `environments/<env>.yml`, **and**
-into `/etc/frankenphp/php.d/` by `servers/octane.yml` because FrankenPHP's static binary
-has its own embedded PHP that only scans `/etc/frankenphp/php.d/*.ini`.
-
-## Supervisor
-
-- `base.conf` uses `[include] files = /etc/supervisor/programs/*.conf` — compose files mount specific confs into that dir
-- Workers: `workers-<env>.conf` (default `queue:work` + scheduler loop)
-- Server: `server-<type>-<env>.conf` or `server-<type>.conf`
-
-## Deploy flow (`dock deploy`)
-
-1. git fetch + show diff summary
-2. Confirm (unless `-y`)
-3. git pull --rebase --autostash
-4. Ensure USER_ID/GROUP_ID in .env, generate APP_KEY if missing
-5. `dock start --build` (rebuilds image)
-6. Wait for DB ready (60s timeout, 1s poll) — `healthcheck.sh` for mariadb, `pg_isready` for postgres/pgvector
-7. `artisan migrate --force`, storage:link, config/route/view/event cache
-8. `artisan octane:reload` if SERVER=octane
-
-## Template placeholders
-
-`configure-app.sh` replaces `{{APP_NAME}}`, `{{CONTAINER_NAME}}`, `{{DB_NAME}}`, `{{REPO_URL}}` in `.env` and nginx/caddy configs via `sed`.
-
-## Notable design choices
-
-- No `set -e` in `dock` — explicit `|| return 1` used instead; avoids false failures in AND-OR chains
-- `provision_app()` always returns 0 (best-effort); failures only shown in `--verbose`
-- `check_required_ports()` treats port conflicts as warnings (not errors) — you still get a URL even if the port is taken
-- `docker_up` in non-verbose mode suppresses all output (`>/dev/null 2>&1`) — this conflicts with the comment "Always stream docker output" in `cmd_start`; currently a known inconsistency
-- `docker.sh` builds a `_COMPOSE_ARGS` array and runs it directly — no `eval`, no string command
+- `make lint`: `bash -n`, shellcheck, `docker compose config` for all 45 env/server/db combinations.
+- End to end: `./configure-app.sh -t new -n Test -c dltest --non-interactive -y` in a scratch dir, then
+  `./dock start`, switch `SERVER`, and `APP_ENV=production` + `git init && git commit` + `./dock deploy --skip-pull -y`.
+- Keep README.md, docker/AGENTS.md, CHANGELOG.md and this file in sync with behaviour changes.

@@ -1,179 +1,169 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
-# Dockerized Laravel - Multi-Environment Dockerfile
-# Base: php:8.3-fpm (provides both php-fpm and php-cli SAPIs)
-# Octane (FrankenPHP) is optional - the static binary is added for users who
-# pick SERVER=octane. Users on SERVER=nginx/caddy/fpm don't need it.
+# Dockerized Laravel - multi-target Dockerfile
+#
+# Targets (picked by compose via DOCK_ENV, see docker/compose/base.yml):
+#   local       base + Node, no app code baked in (the project is bind-mounted).
+#               Builds in seconds and never touches the build context.
+#   staging     code + vendor + built assets baked in.
+#   production  same as staging, composer --no-dev.
+#
+# Stage graph:
+#   base ──┬── app-base ──┬── local
+#          │              └── release ── staging / production
+#          └── builder ───────────┘ (vendor + public/build)
+#
+# Versions are build args, overridable from .env (PHP_VERSION, NODE_VERSION, ...).
 # =============================================================================
 
-ARG FRANKENPHP_VERSION=1.11.2
+ARG PHP_VERSION=8.5
+ARG NODE_VERSION=24
+ARG DEBIAN_RELEASE=trixie
+
+FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS node
+FROM composer:2 AS composer
+FROM mlocati/php-extension-installer:2 AS php-ext
 
 # -----------------------------------------------------------------------------
-# Stage 1: Builder
+# base: PHP + extensions + system tools. Shared by every other stage, so
+# extensions are compiled once (they used to be built twice).
 # -----------------------------------------------------------------------------
-FROM php:8.3-fpm-bookworm AS builder
+FROM php:${PHP_VERSION}-fpm-${DEBIAN_RELEASE} AS base
 
-ARG BUILD_ENV=local
+# Extra extensions on top of the defaults, space separated (e.g. "imagick soap").
+ARG PHP_EXTENSIONS=""
 
-ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
-RUN chmod +x /usr/local/bin/install-php-extensions
+COPY --from=php-ext /usr/bin/install-php-extensions /usr/local/bin/
+COPY --from=composer /usr/bin/composer /usr/bin/composer
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git unzip curl ca-certificates gnupg \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends supervisor acl procps curl git unzip \
+    && install-php-extensions \
+        bcmath calendar exif gd intl opcache pcntl pdo_mysql pdo_pgsql redis zip \
+        ${PHP_EXTENSIONS} \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /usr/src/*
 
-RUN install-php-extensions zip intl bcmath exif calendar
-
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_NO_INTERACTION=1
 
 WORKDIR /var/www/html
 
-# Copy dependency files AND auth.json (if it exists) BEFORE running composer.
-# composer.json is the only required file: it anchors the COPY (a glob-only
-# COPY with zero matches fails the build). composer.lock is optional so the
-# installer's bootstrap stub and lock-less repos can still build — composer
-# falls back to resolving from composer.json.
-COPY composer.json composer.lock* package.json* package-lock.json* auth.json* ./
+# -----------------------------------------------------------------------------
+# app-base: runtime user + supervisor + optional FrankenPHP.
+# -----------------------------------------------------------------------------
+FROM base AS app-base
 
-RUN if [ "$BUILD_ENV" = "production" ]; then \
-        composer install --no-scripts --no-autoloader --prefer-dist --no-dev; \
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+# 1 only when SERVER=octane (dock sets it). Saves ~100MB on fpm/nginx/caddy images.
+ARG WITH_FRANKENPHP=0
+ARG FRANKENPHP_VERSION=1.13.0
+
+# Runtime user matching the host UID/GID so bind-mounted files keep sane owners.
+# UID/GID 0 is refused: the app never runs as root.
+RUN if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
+        echo "ERROR: USER_ID/GROUP_ID must not be 0 (refusing to run as root)" >&2; exit 1; \
+    fi \
+    && if getent group "${GROUP_ID}" >/dev/null; then \
+        GROUP_NAME=$(getent group "${GROUP_ID}" | cut -d: -f1); \
     else \
-        composer install --no-scripts --no-autoloader --prefer-dist; \
+        groupadd -g "${GROUP_ID}" laravel; GROUP_NAME=laravel; \
+    fi \
+    && if getent passwd "${USER_ID}" >/dev/null; then \
+        EXISTING_USER=$(getent passwd "${USER_ID}" | cut -d: -f1); \
+        [ "$EXISTING_USER" = "laravel" ] || usermod -l laravel -d /home/laravel -m "$EXISTING_USER"; \
+    else \
+        useradd -u "${USER_ID}" -g "${GROUP_NAME}" -m -s /bin/bash laravel; \
+    fi \
+    && usermod -aG www-data laravel \
+    && mkdir -p /etc/supervisor/programs
+
+# FrankenPHP static binary (SERVER=octane only). It embeds its own PHP, which
+# only scans /etc/frankenphp/php.d/*.ini (servers/octane.yml mounts the inis there).
+RUN if [ "${WITH_FRANKENPHP}" = "1" ]; then \
+        case "$(dpkg --print-architecture)" in \
+            amd64) FP_ARCH=x86_64 ;; \
+            arm64) FP_ARCH=aarch64 ;; \
+            *) echo "FrankenPHP: unsupported architecture" >&2; exit 1 ;; \
+        esac \
+        && curl -fsSL --retry 3 -o /usr/local/bin/frankenphp \
+            "https://github.com/php/frankenphp/releases/download/v${FRANKENPHP_VERSION}/frankenphp-linux-${FP_ARCH}" \
+        && chmod +x /usr/local/bin/frankenphp \
+        && /usr/local/bin/frankenphp version \
+        && mkdir -p /etc/frankenphp/php.d; \
     fi
 
-# Pre-install npm deps before copying source for better layer caching.
-# Skipped for local: the volume mount overlays public/build anyway.
-RUN if [ "$BUILD_ENV" != "local" ] && [ -f "package.json" ] && [ -f "package-lock.json" ]; then \
-        npm ci --no-audit --no-fund; \
-    fi
+EXPOSE 8000 9000
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/00-base.conf"]
+
+# -----------------------------------------------------------------------------
+# local: dev image. Code comes from the bind mount; Node is here for
+# `./dock npm`, Vite and `octane --watch`.
+# -----------------------------------------------------------------------------
+FROM app-base AS local
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
+
+# -----------------------------------------------------------------------------
+# builder: composer + npm build. Never shipped.
+# -----------------------------------------------------------------------------
+FROM base AS builder
+
+ARG BUILD_ENV=production
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+
+# Dependency manifests first for layer caching. composer.json anchors the COPY
+# (a glob-only COPY with zero matches fails); the rest are optional.
+COPY composer.json composer.lock* auth.json* ./
+
+RUN --mount=type=cache,target=/root/.composer/cache \
+    NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev) \
+    && composer install --no-scripts --no-autoloader --prefer-dist $NO_DEV
+
+COPY package.json* package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm \
+    if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
+    elif [ -f package.json ]; then npm install --no-audit --no-fund; fi
 
 COPY . .
 
-# Build frontend assets (production/staging only).
-# --if-present skips gracefully when no "build" script is defined in package.json.
-RUN if [ "$BUILD_ENV" != "local" ] && [ -f "package.json" ]; then \
-        npm run --if-present build; \
-    fi
-
-# Defensive heal: if .dockerignore is missing on the host, `COPY . .` will
-# overlay the host's vendor/ on top of the freshly-installed one above and
-# ship whatever stale package versions happen to be on the developer's laptop.
-# Re-running composer install is idempotent when vendor matches composer.lock
-# (fast lockfile validate + autoload dump) and self-heals when vendor was
-# clobbered. --optimize-autoloader subsumes the previous dump-autoload step.
-RUN if [ "$BUILD_ENV" = "production" ]; then \
-        composer install --no-scripts --prefer-dist --no-dev --optimize-autoloader; \
-    else \
-        composer install --no-scripts --prefer-dist --optimize-autoloader; \
-    fi
-
-RUN rm -f auth.json
+# Re-running composer install is idempotent when vendor/ matches the lock and
+# self-heals if a missing .dockerignore let the host's vendor/ overwrite it.
+# --no-scripts skips package:discover, and the host's bootstrap/cache was built
+# with dev packages (e.g. Pail): rebuild the manifest for what is installed.
+RUN --mount=type=cache,target=/root/.composer/cache \
+    NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev) \
+    && composer install --no-scripts --prefer-dist --optimize-autoloader $NO_DEV \
+    && mkdir -p bootstrap/cache && rm -f bootstrap/cache/*.php \
+    && php artisan package:discover --ansi \
+    && if [ -f package.json ]; then npm run --if-present build; fi \
+    && rm -rf node_modules auth.json
 
 # -----------------------------------------------------------------------------
-# Stage 2: Runtime
+# release: staging / production image with code baked in.
 # -----------------------------------------------------------------------------
-FROM php:8.3-fpm-bookworm AS runtime
+FROM app-base AS release
 
-ARG BUILD_ENV=local
-ARG USER_ID=1000
-ARG GROUP_ID=1000
-ARG FRANKENPHP_VERSION=1.11.2
-ARG TARGETARCH
-
-ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
-RUN chmod +x /usr/local/bin/install-php-extensions
-
-ENV SERVER_NAME=":8000"
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor curl acl nano procps git unzip ca-certificates netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-
-RUN install-php-extensions \
-    pdo_pgsql pdo_mysql gd intl zip opcache redis pcntl bcmath exif calendar mbstring
-
-# Install FrankenPHP static binary - only needed when SERVER=octane.
-# Harmless dead weight (~30MB) otherwise. Detected arch fallback to amd64.
-RUN ARCH=$(dpkg --print-architecture) && \
-    case "$ARCH" in \
-        amd64) FP_ARCH=x86_64 ;; \
-        arm64) FP_ARCH=aarch64 ;; \
-        *)     FP_ARCH=x86_64 ;; \
-    esac && \
-    curl -fsSL -o /usr/local/bin/frankenphp \
-        "https://github.com/dunglas/frankenphp/releases/download/v${FRANKENPHP_VERSION}/frankenphp-linux-${FP_ARCH}" && \
-    chmod +x /usr/local/bin/frankenphp && \
-    mkdir -p /etc/frankenphp/php.d
-# ^ /etc/frankenphp/php.d/*.ini is the config scan dir for the static binary's
-#   embedded PHP (SERVER=octane mounts the tuning inis here — see servers/octane.yml).
-
-# Create laravel user matching host UID/GID. UID 0 forbidden (no app-as-root).
-RUN if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
-        echo "ERROR: USER_ID/GROUP_ID must not be 0 (refusing to run as root)" >&2; \
-        exit 1; \
-    fi && \
-    if getent group ${GROUP_ID} >/dev/null; then \
-        EXISTING_GROUP=$(getent group ${GROUP_ID} | cut -d: -f1); \
-    else \
-        groupadd -g ${GROUP_ID} laravel; \
-        EXISTING_GROUP=laravel; \
-    fi && \
-    if getent passwd ${USER_ID} >/dev/null; then \
-        EXISTING_USER=$(getent passwd ${USER_ID} | cut -d: -f1); \
-        if [ "$EXISTING_USER" != "laravel" ]; then \
-            usermod -l laravel -d /home/laravel -m "$EXISTING_USER" 2>/dev/null || true; \
-            groupmod -n laravel "$EXISTING_USER" 2>/dev/null || true; \
-        fi; \
-    else \
-        useradd -u ${USER_ID} -g ${EXISTING_GROUP} -m laravel; \
-    fi && \
-    usermod -aG www-data laravel
-
-WORKDIR /var/www/html
-
-# Supervisor program drop-in dir (env compose + server compose mount here)
-RUN mkdir -p /etc/supervisor/programs
-
-# Copy application from builder stage
 COPY --from=builder --chown=laravel:www-data /var/www/html /var/www/html
 
-# Create runtime dirs (storage/bootstrap may not exist in slim apps or be
-# .dockerignored) and prelink frankenphp binary for octane:frankenphp.
-RUN mkdir -p /var/www/html/vendor/laravel/octane/bin \
-             /var/www/html/storage/framework/cache \
-             /var/www/html/storage/framework/sessions \
-             /var/www/html/storage/framework/views \
-             /var/www/html/storage/logs \
-             /var/www/html/bootstrap/cache \
-    && ln -sf /usr/local/bin/frankenphp /var/www/html/vendor/laravel/octane/bin/frankenphp-linux-x86_64 \
-    && ln -sf /usr/local/bin/frankenphp /var/www/html/vendor/laravel/octane/bin/frankenphp-linux-aarch64 \
-    && chown -R laravel:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/vendor/laravel/octane/bin \
-    && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+RUN mkdir -p storage/app/public storage/framework/cache storage/framework/sessions \
+             storage/framework/views storage/logs bootstrap/cache \
+    && chown -R laravel:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
 
-USER laravel
+# Only env-independent caches here: .env is not in the build context, so
+# config/route/event caches built now would bake a NULL APP_KEY (e.g. Livewire's
+# /livewire-<hash>/ route prefix). `dock deploy` builds them at runtime with the
+# real .env mounted. view:cache only compiles Blade, safe at build time.
+RUN su laravel -s /bin/sh -c "php artisan view:cache" || true
 
-# Only env-INDEPENDENT caches are built here. The real .env (APP_KEY, etc.) is
-# .dockerignored, so it is NOT present at build time. config:cache / route:cache
-# would bake values derived from a NULL APP_KEY into the image -- notably
-# Livewire's "/livewire-<sha256(APP_KEY)>/" asset route prefix. Combined with
-# opcache.validate_timestamps=Off, php-fpm would then keep serving that
-# wrong-key route cache and every Livewire asset 404s. So config/route/event
-# caches are built at RUNTIME by `dock deploy` (which mounts the real .env and
-# reloads php-fpm afterwards). view:cache only compiles Blade -> safe at build.
-RUN if [ "$BUILD_ENV" = "production" ] || [ "$BUILD_ENV" = "staging" ]; then \
-        php artisan view:cache; \
-    else \
-        echo "Skipping optimizations for ${BUILD_ENV} environment"; \
-    fi
-
-# php-fpm pool default port (overridden by mounted pool.conf)
-EXPOSE 8000 9000
-
-USER root
-
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/00-base.conf"]
+FROM release AS staging
+FROM release AS production
