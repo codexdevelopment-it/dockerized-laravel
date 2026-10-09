@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The `.env` template lists every image pin on its own line with its default (`PHP_VERSION`,
+  `NODE_VERSION`, `FRANKENPHP_VERSION`, `MARIADB_VERSION`, `POSTGRES_VERSION`, `PGVECTOR_VERSION`,
+  `NGINX_VERSION`, `CADDY_VERSION`, `REDIS_VERSION`, `MAILPIT_VERSION`, `MEILISEARCH_VERSION`,
+  `PHPMYADMIN_VERSION`, `SOKETI_VERSION`, `GOTENBERG_VERSION`), so a project pins one by uncommenting
+  it. The compose defaults are unchanged.
+
 ## 3.0.0 — 2026-10-05
 
 ### Upgrade notes

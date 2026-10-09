@@ -132,6 +132,9 @@ Everything lives in `.env`. Docker-related keys:
 | `NODE_VERSION` | `24` | Node major (local image + asset build) |
 | `PHP_EXTENSIONS` | — | Extra extensions, e.g. `"imagick soap"` ([list](https://github.com/mlocati/docker-php-extension-installer#supported-php-extensions)) |
 | `FRANKENPHP_VERSION` | `1.13.0` | FrankenPHP binary for `SERVER=octane` |
+| `MARIADB_VERSION`, `POSTGRES_VERSION`, `PGVECTOR_VERSION` | `11.4`, `16.15`, `0.8.7-pg17` | Database image tags (see [Databases](#databases)) |
+| `NGINX_VERSION`, `CADDY_VERSION` | `stable-alpine`, `2-alpine` | Web server image tags |
+| `REDIS_VERSION`, `MAILPIT_VERSION`, `MEILISEARCH_VERSION`, `PHPMYADMIN_VERSION`, `SOKETI_VERSION`, `GOTENBERG_VERSION` | see [Services](#services) | Service image tags |
 | `APP_MEMORY_LIMIT`, `DB_MEMORY_LIMIT` | `1G` | Container memory limits in production |
 | `USER_ID`, `GROUP_ID` | your UID/GID | Container user (written by `deploy`) |
 
@@ -182,7 +185,9 @@ rebuild never silently changes the major that owns the data dir. Same-major bump
 | `soketi` | `quay.io/soketi/soketi` | 6001 (public, `SOKETI_BIND`) | `soketi:6001` |
 | `gotenberg` | `gotenberg/gotenberg:8` | 3000 | `http://gotenberg:3000` |
 
-Each image tag is overridable (`REDIS_VERSION`, `MAILPIT_VERSION`, `MEILISEARCH_VERSION`, …).
+Each image tag is pinned and overridable from `.env` (`REDIS_VERSION`, `MAILPIT_VERSION`,
+`MEILISEARCH_VERSION`, `PHPMYADMIN_VERSION`, `SOKETI_VERSION`, `GOTENBERG_VERSION`); the template lists
+every pin with its default, one per line, ready to uncomment.
 Outside local set `MEILISEARCH_KEY` (16+ chars) and `MEILI_ENV=production`.
 
 ## Production deployment
