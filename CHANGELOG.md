@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Staging builds failed** at `composer install` with exit code 1 and no output:
+  `NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev)` takes the exit status of the failed test
+  when `BUILD_ENV` is not `production`, so `&&` skipped composer. Now `|| true`. CI builds the `staging`
+  target too.
+
 ### Changed
 
 - The `.env` template lists every image pin on its own line with its default (`PHP_VERSION`,

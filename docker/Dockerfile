@@ -120,12 +120,16 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 
+# NO_DEV: `|| true` matters. An assignment takes the exit status of its command
+# substitution, so without it a non-production build (staging) "fails" the
+# assignment and `&&` silently skips composer: exit 1 with no output.
+
 # Dependency manifests first for layer caching. composer.json anchors the COPY
 # (a glob-only COPY with zero matches fails); the rest are optional.
 COPY composer.json composer.lock* auth.json* ./
 
 RUN --mount=type=cache,target=/root/.composer/cache \
-    NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev) \
+    NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev || true) \
     && composer install --no-scripts --no-autoloader --prefer-dist $NO_DEV
 
 COPY package.json* package-lock.json* ./
@@ -140,7 +144,7 @@ COPY . .
 # --no-scripts skips package:discover, and the host's bootstrap/cache was built
 # with dev packages (e.g. Pail): rebuild the manifest for what is installed.
 RUN --mount=type=cache,target=/root/.composer/cache \
-    NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev) \
+    NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev || true) \
     && composer install --no-scripts --prefer-dist --optimize-autoloader $NO_DEV \
     && mkdir -p bootstrap/cache && rm -f bootstrap/cache/*.php \
     && php artisan package:discover --ansi \
