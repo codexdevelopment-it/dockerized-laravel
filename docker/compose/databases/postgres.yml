@@ -1,6 +1,6 @@
 # =============================================================================
 # PostgreSQL: base service (no published port, bind-mounted data dir).
-# Env overrides: postgres-local.yml / -staging.yml / -production.yml.
+# Env override: postgres-production.yml. Host port: ports/postgres.yml (PUBLISH_DB_PORT).
 # POSTGRES_VERSION is pinned: the data dir is major-locked (major bump = pg_upgrade or dump/restore).
 # =============================================================================
 

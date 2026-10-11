@@ -44,13 +44,13 @@ published_ports() {
         caddy) echo "${HTTP_PORT:-80}:HTTP ${HTTPS_PORT:-443}:HTTPS" ;;
         *)     echo "${APP_PORT:-8000}:App" ;;
     esac
-    if [[ "$(get_env_compose_file)" != "production" ]]; then
+    if publish_db_port; then
         if is_postgres_driver; then echo "${FORWARD_DB_PORT:-5432}:Database"; else echo "${FORWARD_DB_PORT:-3306}:Database"; fi
     fi
     local s
     for s in $(parse_services); do
         case "$s" in
-            redis)       echo "${FORWARD_REDIS_PORT:-6379}:Redis" ;;
+            redis)       publish_redis_port && echo "${FORWARD_REDIS_PORT:-6379}:Redis" ;;
             mailpit)     echo "${MAILPIT_UI_PORT:-8025}:Mailpit ${MAILPIT_SMTP_PORT:-1025}:Mailpit-SMTP" ;;
             meilisearch) echo "${MEILISEARCH_PORT:-7700}:Meilisearch" ;;
             phpmyadmin)  echo "${PHPMYADMIN_PORT:-8080}:phpMyAdmin" ;;

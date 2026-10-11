@@ -1,5 +1,5 @@
 # =============================================================================
-# pgvector, production: no published port, memory limit for a typical VPS.
+# pgvector, production: memory limit for a typical VPS.
 # =============================================================================
 
 services:

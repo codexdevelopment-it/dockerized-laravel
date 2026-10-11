@@ -1,0 +1,10 @@
+# =============================================================================
+# redis: host port (the app always uses redis:6379 on the network).
+# Added by dock only when PUBLISH_REDIS_PORT is not false. Bound to SERVICES_BIND
+# (default 127.0.0.1); FORWARD_REDIS_PORT only changes the host side.
+# =============================================================================
+
+services:
+  redis:
+    ports:
+      - '${SERVICES_BIND:-127.0.0.1}:${FORWARD_REDIS_PORT:-6379}:6379'

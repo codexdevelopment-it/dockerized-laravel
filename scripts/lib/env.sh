@@ -74,6 +74,21 @@ get_db_driver() {
     echo "$driver"
 }
 
+# Host port publishing toggles: on in local, off in staging/production unless
+# PUBLISH_DB_PORT / PUBLISH_REDIS_PORT is set to true.
+_is_false() { case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in false|0|no|off) return 0 ;; *) return 1 ;; esac; }
+_is_true() { case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in true|1|yes|on) return 0 ;; *) return 1 ;; esac; }
+
+publish_db_port() {
+    if [[ -n "${PUBLISH_DB_PORT:-}" ]]; then _is_true "$PUBLISH_DB_PORT"; return; fi
+    [[ "$(get_env_compose_file)" == "local" ]]
+}
+
+publish_redis_port() {
+    if [[ -n "${PUBLISH_REDIS_PORT:-}" ]]; then _is_true "$PUBLISH_REDIS_PORT"; return; fi
+    [[ "$(get_env_compose_file)" == "local" ]]
+}
+
 is_postgres_driver() { [[ "$(get_db_driver)" == "postgres" || "$(get_db_driver)" == "pgvector" ]]; }
 
 # SERVICES="redis, mailpit" -> "redis mailpit"

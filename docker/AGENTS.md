@@ -46,6 +46,8 @@ PHP, Composer, Node and the database live in containers, **not on the host**.
   From the app, services are reached by service name: DB host `mariadb` or `postgres`, `redis`, `mailpit:1025`,
   `meilisearch:7700`, `gotenberg:3000`, `soketi:6001`.
 - Host ports: app on `APP_PORT` (default 8000); DB/Redis/Mailpit/… bound to `127.0.0.1` only.
+  DB / Redis host ports are published in local only; set `PUBLISH_DB_PORT=true` / `PUBLISH_REDIS_PORT=true`
+  in `.env` to publish them in staging/production. The app reaches them by service name either way.
 - Local: the whole project is bind-mounted, code changes are live; queue worker uses `queue:listen`.
   Staging/production: code is baked into the image, only `storage/` and `.env` are mounted.
 - Background processes (server, queue workers, scheduler) run under supervisor in the app container:

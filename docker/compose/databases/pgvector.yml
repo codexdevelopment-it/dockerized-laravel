@@ -1,6 +1,6 @@
 # =============================================================================
 # PostgreSQL + pgvector: base service (no published port, bind-mounted data dir).
-# Env overrides: pgvector-local.yml / -staging.yml / -production.yml.
+# Env override: pgvector-production.yml. Host port: ports/postgres.yml (PUBLISH_DB_PORT).
 # Same as postgres.yml plus the vector extension. Service/host name stays
 # `postgres` so DB_HOST is identical for both drivers. PGVECTOR_VERSION is pinned.
 # =============================================================================

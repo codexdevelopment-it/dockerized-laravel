@@ -1,6 +1,6 @@
 # =============================================================================
 # MariaDB: base service (no published port, bind-mounted data dir).
-# Env overrides: mariadb-local.yml / -staging.yml / -production.yml.
+# Env override: mariadb-production.yml. Host port: ports/mariadb.yml (PUBLISH_DB_PORT).
 # MARIADB_VERSION is pinned to an LTS line: never let a rebuild silently change it.
 # =============================================================================
 

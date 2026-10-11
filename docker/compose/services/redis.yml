@@ -1,6 +1,6 @@
 # =============================================================================
-# Redis: cache, sessions, queues. Host port bound to SERVICES_BIND (127.0.0.1).
-# FORWARD_REDIS_PORT only changes the host side; the app keeps redis:6379.
+# Redis: cache, sessions, queues. Host port is added by ports/redis.yml
+# (PUBLISH_REDIS_PORT); the app keeps redis:6379.
 # =============================================================================
 
 services:
@@ -8,8 +8,6 @@ services:
     container_name: '${CONTAINER_NAME}-redis'
     image: 'redis:${REDIS_VERSION:-8-alpine}'
     restart: '${RESTART_POLICY:-no}'
-    ports:
-      - '${SERVICES_BIND:-127.0.0.1}:${FORWARD_REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     networks:

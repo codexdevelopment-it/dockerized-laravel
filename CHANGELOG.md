@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- `PUBLISH_DB_PORT` / `PUBLISH_REDIS_PORT` (`true`/`false`). Default: published in local, **not** in
+  staging/production (docker network only). Staging used to publish the DB and Redis was published
+  everywhere; set `true` to keep that. Host ports now live in `docker/compose/ports/*.yml`, added by `build_compose_args` when enabled;
+  `databases/*-local.yml` and `*-staging.yml` are gone (`dock update` removes them).
+
 ### Fixed
 
 - **Staging builds failed** at `composer install` with exit code 1 and no output:

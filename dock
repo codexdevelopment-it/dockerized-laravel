@@ -990,6 +990,8 @@ cmd_update() {
     mkdir -p "${PROJECT_ROOT}/scripts/lib" "${PROJECT_ROOT}/docker/compose"
     cp -R "${src}/scripts/lib/." "${PROJECT_ROOT}/scripts/lib/"
     cp -R "${src}/docker/compose/." "${PROJECT_ROOT}/docker/compose/"
+    # Replaced by docker/compose/ports/ + PUBLISH_DB_PORT.
+    rm -f "${PROJECT_ROOT}"/docker/compose/databases/{mariadb,postgres,pgvector}-{local,staging}.yml
     for rel in docker/Dockerfile docker/AGENTS.md; do
         [[ -f "${src}/${rel}" ]] && cp "${src}/${rel}" "${PROJECT_ROOT}/${rel}"
     done

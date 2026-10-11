@@ -15,7 +15,8 @@ source "${SCRIPT_LIB_DIR}/env.sh"
 _COMPOSE_ARGS=()
 
 # Fill _COMPOSE_ARGS with: base, database (+ env override), environment,
-# server, then one file per SERVICES entry.
+# server, then one file per SERVICES entry, then optional host-port files
+# (ports/<service>.yml, see publish_db_port / publish_redis_port).
 build_compose_args() {
     local dir="${PROJECT_ROOT}/docker/compose" env db file service
     prepare_compose_env
@@ -41,7 +42,17 @@ build_compose_args() {
             return 1
         fi
         _COMPOSE_ARGS+=(-f "$file")
+        if [[ "$service" == "redis" ]] && publish_redis_port; then
+            _COMPOSE_ARGS+=(-f "${dir}/ports/redis.yml")
+        fi
     done
+
+    if publish_db_port; then
+        case "$db" in
+            mariadb) _COMPOSE_ARGS+=(-f "${dir}/ports/mariadb.yml") ;;
+            postgres|pgvector) _COMPOSE_ARGS+=(-f "${dir}/ports/postgres.yml") ;;
+        esac
+    fi
 
     print_debug "${_COMPOSE_ARGS[*]}"
 }

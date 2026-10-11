@@ -1,5 +1,5 @@
 # =============================================================================
-# postgres, production: no published port, memory limit for a typical VPS.
+# postgres, production: memory limit for a typical VPS (port: PUBLISH_DB_PORT).
 # =============================================================================
 
 services:

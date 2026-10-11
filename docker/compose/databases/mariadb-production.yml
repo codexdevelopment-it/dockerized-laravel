@@ -1,5 +1,5 @@
 # =============================================================================
-# mariadb, production: no published port, memory limit for a typical VPS.
+# mariadb, production: memory limit for a typical VPS.
 # =============================================================================
 
 services:

@@ -54,6 +54,9 @@ docker/
 - Passthrough commands (artisan, composer, npm, php, exec, ...) receive args verbatim: global flags are only
   parsed before the command, or after it for dock's own commands (`PASSTHROUGH_COMMANDS` in `dock`).
 - `load_env`: shell environment wins over `.env`. Code that changes `.env` mid-run must also `export`.
+- DB/Redis host ports come from `docker/compose/ports/*.yml`, added only when `publish_db_port` /
+  `publish_redis_port` allow (`PUBLISH_DB_PORT`, `PUBLISH_REDIS_PORT`). Keep `published_ports` in
+  `checks.sh` in sync.
 - Host ports of auxiliary services bind to `${SERVICES_BIND:-127.0.0.1}`. Only the app/web ports and
   Soketi are public. `FORWARD_*` vars change the host side only.
 - Database images stay pinned to a major/LTS line (data dirs are major-locked). Pgvector keeps service

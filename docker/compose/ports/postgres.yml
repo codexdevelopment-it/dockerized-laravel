@@ -1,6 +1,7 @@
 # =============================================================================
-# postgres, local: publish the DB port on SERVICES_BIND (default 127.0.0.1) for
-# desktop clients (TablePlus, DBeaver, ...). Never on all interfaces by default.
+# postgres / pgvector: host port for desktop clients.
+# Added by dock only when PUBLISH_DB_PORT is not false. Bound to SERVICES_BIND
+# (default 127.0.0.1); FORWARD_DB_PORT only changes the host side.
 # =============================================================================
 
 services:

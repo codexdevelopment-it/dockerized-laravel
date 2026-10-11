@@ -127,6 +127,8 @@ Everything lives in `.env`. Docker-related keys:
 | `DB_MOUNT_PATH` | `./db-data` | Host dir for database files |
 | `SERVICES_BIND` | `127.0.0.1` | Interface for DB / Redis / Mailpit / … host ports |
 | `FORWARD_DB_PORT`, `FORWARD_REDIS_PORT` | `3306`/`5432`, `6379` | Host-side ports (the app keeps the container ports) |
+| `PUBLISH_DB_PORT` | `true` (local), `false` (staging/production) | Publish the DB port on the host. `false` keeps it docker-network only |
+| `PUBLISH_REDIS_PORT` | `true` (local), `false` (staging/production) | Same for Redis |
 | `MAILPIT_UI_PORT`, `MEILISEARCH_PORT`, `PHPMYADMIN_PORT`, `SOKETI_PORT`, `GOTENBERG_PORT` | defaults | Host-side ports |
 | `PHP_VERSION` | `8.5` | PHP minor version of the image |
 | `NODE_VERSION` | `24` | Node major (local image + asset build) |
@@ -166,8 +168,9 @@ FrankenPHP is baked only into `octane` images (tagged `<name>:<env>-octane`), so
 | `postgres` | `postgres:16.15-alpine` | `DB_CONNECTION=pgsql`, `DB_HOST=postgres`, `DB_PORT=5432` |
 | `pgvector` | `pgvector/pgvector:0.8.7-pg17` | as `postgres`; `vector` extension created on a fresh data dir |
 
-The DB runs as `<CONTAINER_NAME>-db`; data is bind-mounted from `DB_MOUNT_PATH`. Local and staging publish
-the port on `127.0.0.1:FORWARD_DB_PORT` for desktop clients; production publishes nothing.
+The DB runs as `<CONTAINER_NAME>-db`; data is bind-mounted from `DB_MOUNT_PATH`. Local publishes
+the port on `127.0.0.1:FORWARD_DB_PORT` for desktop clients; staging and production publish nothing. Set
+`PUBLISH_DB_PORT=true` to publish it there too (still on `SERVICES_BIND`).
 
 Versions are pinned (override with `MARIADB_VERSION` / `POSTGRES_VERSION` / `PGVECTOR_VERSION`) so a
 rebuild never silently changes the major that owns the data dir. Same-major bumps are safe in place
@@ -178,7 +181,7 @@ rebuild never silently changes the major that owns the data dir. Same-major bump
 
 | Service | Image | Host port (on `SERVICES_BIND`) | From the app |
 |---|---|---|---|
-| `redis` | `redis:8-alpine` | `FORWARD_REDIS_PORT` 6379 | `redis:6379` |
+| `redis` | `redis:8-alpine` | `FORWARD_REDIS_PORT` 6379 (local only, or `PUBLISH_REDIS_PORT=true`) | `redis:6379` |
 | `mailpit` | `axllent/mailpit:v1.31` | UI 8025, SMTP 1025 | `mailpit:1025` |
 | `meilisearch` | `getmeili/meilisearch:v1.54` | 7700 | `http://meilisearch:7700` |
 | `phpmyadmin` | `phpmyadmin:5.2` | 8080 | MariaDB only |
