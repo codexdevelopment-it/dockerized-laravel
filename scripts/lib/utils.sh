@@ -69,6 +69,13 @@ get_env_value() {
     printf '%s' "$line"
 }
 
+# human_size <bytes> -> 512 B | 1.4 MB
+human_size() {
+    awk -v b="${1:-0}" 'BEGIN { split("B KB MB GB TB", u, " "); i = 1
+        while (b >= 1024 && i < 5) { b /= 1024; i++ }
+        printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i] }'
+}
+
 # Random base64 string of N bytes without depending on openssl.
 random_base64() {
     head -c "${1:-32}" /dev/urandom | base64 | tr -d '\n'

@@ -4,6 +4,14 @@
 
 ### Added
 
+- `./dock backups`: encrypted off-site DB backups on S3-compatible storage (AWS, DigitalOcean Spaces, R2,
+  MinIO). `enable` asks for the missing `BACKUP_*` settings, saves them to `.env`, checks bucket access and
+  installs a host cron job (`BACKUP_SCHEDULE`, default `0 3 * * *`); `disable`, `status`, `run`, `list`,
+  `download`, `restore`, `prune` (`BACKUP_KEEP_DAYS`, default 30) and `logs`. Dumps are gzipped and
+  encrypted with openssl (AES-256-CBC, PBKDF2-SHA256, 200k iterations); failed uploads wait in
+  `backups/pending/` and are retried; runs are locked against overlap. The AWS CLI runs from
+  `amazon/aws-cli` (no host install). `doctor` checks settings, the cron job and the last run.
+
 - `PUBLISH_DB_PORT` / `PUBLISH_REDIS_PORT` (`true`/`false`). Default: published in local, **not** in
   staging/production (docker network only). Staging used to publish the DB and Redis was published
   everywhere; set `true` to keep that. Host ports now live in `docker/compose/ports/*.yml`, added by `build_compose_args` when enabled;

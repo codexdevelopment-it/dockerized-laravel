@@ -14,8 +14,9 @@ PHP, Composer, Node and the database live in containers, **not on the host**.
   Dockerfile run `./dock start --build`.
 - Don't edit `docker/compose/*` for app-specific tweaks unless asked: prefer `.env` variables.
   `docker/config/*` (php.ini, nginx, Caddy, supervisor, fpm) is meant to be customised.
-- Destructive commands need explicit user approval: `./dock fresh`, `./dock db:restore`, `./dock deploy`,
-  deleting `db-data/`.
+- Destructive commands need explicit user approval: `./dock fresh`, `./dock db:restore`,
+  `./dock backups restore`, `./dock backups prune`, `./dock deploy`, deleting `db-data/`.
+- Never print or copy `BACKUP_*` secrets from `.env` (S3 keys, `BACKUP_PASSWORD`).
 
 ## Everyday commands
 
@@ -32,6 +33,7 @@ PHP, Composer, Node and the database live in containers, **not on the host**.
 | Shell | `./dock shell` (app) · `./dock shell db` · `./dock shell --root` |
 | Database CLI | `./dock db` (mariadb or psql, already authenticated) |
 | Backup / restore | `./dock db:dump [file]` · `./dock db:restore <file.sql.gz>` |
+| Off-site backups (S3) | `./dock backups` (status) · `backups list` · `backups run` · `backups restore <latest\|N>` |
 | Diagnose problems | `./dock doctor` |
 | Resolved compose config | `./dock config` |
 

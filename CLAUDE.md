@@ -23,6 +23,8 @@ scripts/lib/
   checks.sh              check_docker, port checks, run_preflight_checks
   ui.sh                  run_step (numbered steps, spinner, log capture), step_note, print_box, fmt_duration
   docker.sh              build_compose_args/compose, app_exec/app_run/app_try, reload_app_server, app_url
+  backups.sh             ./dock backups: S3 upload via aws-cli container, cron entry, retention.
+                         Uses dock's db_dump_sql / db_require / cmd_db_restore / env_path.
 scripts/dev/             toolkit-only dev tools (not copied into projects)
 docker/
   Dockerfile             targets: local | staging | production (see header)
@@ -62,6 +64,12 @@ docker/
 - Database images stay pinned to a major/LTS line (data dirs are major-locked). Pgvector keeps service
   name `postgres`; `pgvector` must be recognised wherever `postgres` is (`is_postgres_driver`).
 - `docker/config/*` belongs to the user after install: `dock update` never overwrites it.
+- Backups: remote names are UTC stamps (`BACKUP_STAMP_FORMAT`) so they sort chronologically and
+  retention compares names; listing and pruning only touch names matching `BACKUP_NAME_RE`. Changing
+  `BACKUP_CIPHER` makes existing backups undecryptable with the new code: don't, or support both.
+  S3 credentials reach the aws-cli container via `-e VAR` (environment), never argv. The cron line is
+  found by its `# dock-backups:<PROJECT_ROOT>:` marker; read the crontab fully before `crontab -`.
+  `BACKUP_*` values are written single-quoted (literal for phpdotenv too).
 
 ## Dockerfile
 

@@ -37,6 +37,7 @@ source "${SCRIPT_LIB_DIR}/env.sh"
 source "${SCRIPT_LIB_DIR}/checks.sh"
 source "${SCRIPT_LIB_DIR}/docker.sh"
 source "${SCRIPT_LIB_DIR}/ui.sh"
+source "${SCRIPT_LIB_DIR}/backups.sh"
 
 VERBOSE=false
 QUIET=false
@@ -87,6 +88,16 @@ $(echo -e "${BOLD}DATABASE${NC}")
     db:dump [file]                 Dump to backups/<name>-<date>.sql.gz
     db:restore <file>              Restore a .sql or .sql.gz dump (destructive)
 
+$(echo -e "${BOLD}BACKUPS${NC}") (encrypted, off-site on S3 / Spaces / R2 / MinIO: ./dock help backups)
+    backups enable                 Configure (asks for missing .env values), install the cron job
+    backups disable                Remove the cron job
+    backups [status]               Schedule, last run, remote backups
+    backups run                    Back up now: dump, encrypt, upload, prune
+    backups list                   Remote backups, newest first
+    backups download [latest|N]    Download + decrypt to backups/downloads/
+    backups restore [latest|N]     Download, decrypt and restore (destructive)
+    backups prune | logs [-f]      Apply BACKUP_KEEP_DAYS now · show backups/backup.log
+
 $(echo -e "${BOLD}OPERATIONS${NC}")
     deploy [-y] [--skip-pull] [--backup]   Pull, build, migrate, cache, reload
     doctor                         Diagnose configuration and runtime problems
@@ -104,6 +115,7 @@ $(echo -e "${BOLD}EXAMPLES${NC}")
     ./dock start                    ./dock artisan make:model Post -m
     ./dock logs app -f              ./dock composer require laravel/horizon
     ./dock shell db                 ./dock db:dump && ./dock deploy -y
+    ./dock backups enable           ./dock backups restore latest
 EOF
 }
 
@@ -148,6 +160,39 @@ EOF
 dock db                       Interactive mariadb / psql client
 dock db:dump [file]           Gzipped SQL dump. Default: backups/<container>-<db>-<date>.sql.gz
 dock db:restore <file>        Imports a .sql / .sql.gz into DB_DATABASE (asks first)
+EOF
+        ;;
+        backups|backup) cat <<'EOF'
+dock backups <command>
+    Encrypted database backups uploaded to S3-compatible storage, run by cron
+    on the host. Settings live in .env (enable asks for the missing ones):
+      BACKUP_S3_ENDPOINT    empty for AWS, e.g. https://fra1.digitaloceanspaces.com
+      BACKUP_S3_REGION      default us-east-1
+      BACKUP_S3_BUCKET      bucket name
+      BACKUP_S3_PATH        folder in the bucket (default CONTAINER_NAME)
+      BACKUP_S3_ACCESS_KEY, BACKUP_S3_SECRET_KEY
+      BACKUP_PASSWORD       encryption password: keep a copy elsewhere!
+      BACKUP_KEEP_DAYS      delete older backups (default 30, 0 = keep all)
+      BACKUP_SCHEDULE       cron expression (default "0 3 * * *", server time)
+
+    enable [--schedule "0 3 * * *"] [--keep-days N] [--reconfigure] [--now|--no-run]
+                          Save settings, check bucket access, install the cron job.
+                          --reconfigure asks every setting again (current = default)
+    disable               Remove the cron job (settings and backups are kept)
+    status                Settings, cron state, last run, remote count / newest / oldest
+    run                   Dump, gzip, encrypt (openssl AES-256), upload, prune.
+                          Failed uploads stay in backups/pending/ and are retried.
+                          One run at a time; result in backups/last-run
+    list                  Remote backups with number, date and size
+    download [sel]        To backups/downloads/<name>.sql.gz (decrypted)
+    restore [sel]         Download, decrypt, then db:restore (asks first)
+    prune                 Delete backups older than BACKUP_KEEP_DAYS (never the newest)
+    logs [-f] [-n N]      Output of the cron runs (backups/backup.log)
+
+    sel: latest, a number from `list` (1 = newest) or a file name; asked when omitted.
+    Files: <folder>/2026-01-31T03-00-00Z.sql.gz.enc (UTC). Decrypt by hand with:
+      openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -in FILE.sql.gz.enc -out FILE.sql.gz
+    Needs docker, openssl and cron on the host (the AWS CLI runs in a container).
 EOF
         ;;
         update) cat <<'EOF'
@@ -567,6 +612,16 @@ cmd_db() {
     fi
 }
 
+# db_dump_sql: plain SQL dump of DB_DATABASE on stdout.
+db_dump_sql() {
+    if is_postgres_driver; then
+        db_exec pg_dump -U "${DB_USERNAME}" --no-owner --clean --if-exists "${DB_DATABASE}"
+    else
+        db_exec mariadb-dump -u "${DB_USERNAME}" --single-transaction --quick --routines \
+            --triggers --no-tablespaces "${DB_DATABASE}"
+    fi
+}
+
 cmd_db_dump() {
     db_require || return 1
     local file="${1:-}" status
@@ -578,12 +633,7 @@ cmd_db_dump() {
     print_info "Dumping ${DB_DATABASE} to ${file#"${PROJECT_ROOT}"/}..."
     (
         umask 077
-        if is_postgres_driver; then
-            db_exec pg_dump -U "${DB_USERNAME}" --no-owner --clean --if-exists "${DB_DATABASE}"
-        else
-            db_exec mariadb-dump -u "${DB_USERNAME}" --single-transaction --quick --routines \
-                --triggers --no-tablespaces "${DB_DATABASE}"
-        fi | gzip > "$file"
+        db_dump_sql | gzip > "$file"
         exit "${PIPESTATUS[0]}"
     )
     status=$?
@@ -913,6 +963,21 @@ cmd_doctor() {
         grep -qE "^/?${f}/?\*?$" "${PROJECT_ROOT}/.gitignore" 2>/dev/null || _warn "Add /${f} to .gitignore"
     done
 
+    if [[ -n "${BACKUP_S3_BUCKET:-}" ]]; then
+        print_section "Backups"
+        [[ -z "$(backup_missing_vars)" ]] && _ok "Settings complete" || _fail "Missing in .env: $(backup_missing_vars)"
+        [[ -n "$(backup_cron_entry)" ]] && _ok "Cron job installed" || _warn "No cron job (./dock backups enable)"
+        command_exists openssl || _fail "openssl missing on the host: backups can't run"
+        f="$(cat "$(backup_state)" 2>/dev/null)"
+        case "$f" in
+            ok\ *)     _ok "Last run: ${f#ok }" ;;
+            failed\ *) _fail "Last run failed: ${f#failed } (./dock backups logs)" ;;
+            *)         _warn "No backup has run yet (./dock backups run)" ;;
+        esac
+        f="$(find "$(backup_pending)" -name '*.sql.gz.enc' 2>/dev/null | wc -l | tr -d ' ')"
+        [[ "$f" -gt 0 ]] && _warn "${f} backup(s) waiting for upload in backups/pending/"
+    fi
+
     print_section "Runtime"
     if is_container_running "${CONTAINER_NAME:-}"; then
         _ok "App container running"
@@ -1096,6 +1161,7 @@ main() {
         db)                 cmd_db "${ARGS[@]}" ;;
         db:dump)            cmd_db_dump "${ARGS[@]}" ;;
         db:restore)         cmd_db_restore "${ARGS[@]}" ;;
+        backups|backup)     cmd_backups "${ARGS[@]}" ;;
         deploy)             cmd_deploy "${ARGS[@]}" ;;
         doctor)             cmd_doctor "${ARGS[@]}" ;;
         update|self-update) cmd_update "${ARGS[@]}" ;;
