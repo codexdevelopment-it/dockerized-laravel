@@ -5,6 +5,6 @@
 services:
   app:
     ports:
-      - '${APP_PORT:-8000}:8000'
+      - '${DOCK_APP_BIND:-}${APP_PORT:-8000}:8000'
     volumes:
       - '../config/supervisor/server-artisan.conf:/etc/supervisor/programs/20-server.conf:ro'

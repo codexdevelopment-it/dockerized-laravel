@@ -10,6 +10,17 @@
   installs the cron job; `disable`, `status`, `logs`, `run`. Failed deploys are not retried for the same
   commit; repeated problems are logged once. State and log live in `.git/dock/`. `./dock deploy` shows
   the command to enable it while it is off (`AUTODEPLOY=false` hides the hint); `doctor` reports it.
+- `APT_PACKAGES` (extra Debian packages) and build hooks in `docker/config/build/`: `runtime.sh` runs as
+  root in every app image (Python venvs, downloads, ...), `release.sh` in staging/production images with
+  the code in place. They reach the build as the named context `dock-build` (compose
+  `additional_contexts`, Compose ≥ 2.17), so `.dockerignore` can't hide them. `dock update` adds the
+  default no-op scripts.
+- `docker/compose/project.yml`: optional project-owned overrides, always merged last (a custom DB image,
+  Redis persistence, extra volumes). The toolkit never ships it, so `dock update` keeps it.
+- `docker/config/deploy-artisan.txt`: artisan commands `./dock deploy` runs after migrations and caches
+  (e.g. `scout:sync-index-settings`), one per line; failures are warnings.
+- `APP_BIND` (e.g. `127.0.0.1`): publish the app port of `artisan`/`octane`/`nginx` on one interface
+  only, for servers with a reverse proxy on the host. Unset keeps publishing on every interface.
 - Deploys take a lock (`.git/dock/deploy.lock`): a manual deploy and an auto-deploy never overlap.
 - Risky-setting warnings on `start`/`deploy`/`config` and in `doctor` (failures for the insecure
   ones): FastCGI, DB, Redis or phpMyAdmin published on a non-loopback `SERVICES_BIND`, `APP_DEBUG`,
@@ -34,6 +45,15 @@
 
 ### Fixed
 
+- `SERVER=octane` ignored `PHP_VERSION` for web requests: FrankenPHP's static binary embeds its own PHP
+  (8.5 in 1.13.0) and extension set, while artisan, queues and the scheduler used `PHP_VERSION`. Octane
+  images are now built on `dunglas/frankenphp:<FRANKENPHP_VERSION>-php<PHP_VERSION>-trixie`, so server
+  and CLI share one PHP and the toolkit's extensions; the `/etc/frankenphp/php.d` ini mounts are gone.
+- Staging/production builds failed with "Please provide a valid cache path" when a project's
+  `.dockerignore` excluded `storage/framework/views` itself: the builder creates the framework dirs.
+- Staging/production builds failed for apps with composer `path` repositories (e.g. Nova's
+  `./nova-components/*`): the dependency layer ran before the code was copied. That layer is now best
+  effort; the install after `COPY . .` completes it.
 - The terminal cursor stayed hidden when a step of `start`, `restart` or `deploy` failed.
 - `db:dump` printed its result twice; the migration count of `deploy` included "Creating migration table".
 - `./dock db`, `db:dump`, `db:restore`: the DB password was passed as `docker exec -e VAR=value`, visible
@@ -58,6 +78,7 @@
 
 ### Changed
 
+- The app image ships the `pgsql` extension next to `pdo_pgsql` (ext-pgsql, `pg_*` functions).
 - `deploy` preview: risky settings are listed in a "Warnings" section next to the confirmation (not above
   the header); the URL is `APP_URL` in staging/production; `--skip-pull` shows the deployed commit and
   says the working tree is deployed as-is (uncommitted tracked changes included) instead of "no new

@@ -225,6 +225,7 @@ create_laravel_app() {
     command -v docker >/dev/null || { print_error "Docker is required"; exit 1; }
     print_info "Building the PHP image (first time takes a few minutes)..."
     docker build --quiet --target local -t "$image" \
+        --build-context dock-build="${TMP_DIR}/docker/config/build" \
         --build-arg USER_ID=1000 --build-arg GROUP_ID=1000 \
         -f "${TMP_DIR}/docker/Dockerfile" "${TMP_DIR}" >/dev/null
     print_info "composer create-project laravel/laravel ${CONTAINER_BASE_NAME}..."

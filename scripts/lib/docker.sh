@@ -16,7 +16,8 @@ _COMPOSE_ARGS=()
 
 # Fill _COMPOSE_ARGS with: base, database (+ env override), environment,
 # server, then one file per SERVICES entry, then optional host-port files
-# (ports/<service>.yml, see publish_db_port / publish_redis_port).
+# (ports/<service>.yml, see publish_db_port / publish_redis_port), then the
+# project's own overrides (project.yml, never shipped by the toolkit).
 build_compose_args() {
     local dir="${PROJECT_ROOT}/docker/compose" env db file service
     prepare_compose_env
@@ -53,6 +54,8 @@ build_compose_args() {
             postgres|pgvector) _COMPOSE_ARGS+=(-f "${dir}/ports/postgres.yml") ;;
         esac
     fi
+
+    [[ -f "${dir}/project.yml" ]] && _COMPOSE_ARGS+=(-f "${dir}/project.yml")
 
     print_debug "${_COMPOSE_ARGS[*]}"
 }

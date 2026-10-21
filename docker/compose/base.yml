@@ -12,15 +12,19 @@ services:
       context: ../../
       dockerfile: docker/Dockerfile
       target: '${DOCK_ENV:-local}'
+      # Build hooks + their files (docker/config/build), see the Dockerfile.
+      additional_contexts:
+        dock-build: ../config/build
       args:
         BUILD_ENV: '${DOCK_ENV:-local}'
         USER_ID: '${USER_ID:-1000}'
         GROUP_ID: '${GROUP_ID:-1000}'
-        PHP_VERSION: '${PHP_VERSION:-8.5}'
+        PHP_VERSION: '${PHP_VERSION:-8.5.12}'
         NODE_VERSION: '${NODE_VERSION:-24}'
         PHP_EXTENSIONS: '${PHP_EXTENSIONS:-}'
+        APT_PACKAGES: '${APT_PACKAGES:-}'
+        PHP_BASE_IMAGE: '${DOCK_PHP_BASE_IMAGE:-php:8.5.12-fpm-trixie}'
         WITH_FRANKENPHP: '${DOCK_WITH_FRANKENPHP:-0}'
-        FRANKENPHP_VERSION: '${FRANKENPHP_VERSION:-1.13.0}'
     image: '${CONTAINER_NAME}:${DOCK_ENV:-local}${DOCK_IMAGE_SUFFIX:-}'
     restart: '${RESTART_POLICY:-no}'
     working_dir: '/var/www/html'

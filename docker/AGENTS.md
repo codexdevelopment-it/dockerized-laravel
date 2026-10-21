@@ -12,7 +12,9 @@ PHP, Composer, Node and the database live in containers, **not on the host**.
 - Configuration lives in `.env` (dock reads it; there is no `docker-compose.yml` in the root).
   After changing `.env` docker settings run `./dock restart`; after changing PHP version/extensions or the
   Dockerfile run `./dock start --build`.
-- Don't edit `docker/compose/*` for app-specific tweaks unless asked: prefer `.env` variables.
+- Don't edit `docker/compose/*` for app-specific tweaks unless asked: prefer `.env` variables. Project
+  compose additions go in `docker/compose/services/<name>.yml` (enabled via `SERVICES`) or
+  `docker/compose/project.yml` (always applied); `./dock update` never touches those.
   `docker/config/*` (php.ini, nginx, Caddy, supervisor, fpm) is meant to be customised.
 - Destructive commands need explicit user approval: `./dock fresh`, `./dock db:restore`,
   `./dock backups restore`, `./dock backups prune`, `./dock deploy`, `./dock autodeploy enable`,

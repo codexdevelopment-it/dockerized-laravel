@@ -155,7 +155,8 @@ dock deploy [-y|--yes] [--skip-pull] [--backup]
       3. USER_ID/GROUP_ID + APP_KEY into .env, storage permissions
       4. optional DB dump (--backup), build + start containers
       5. wait for the DB, migrate --force, storage:link, rebuild caches
-      6. reload the app server
+      6. reload the app server, queue:restart
+      7. artisan commands listed in docker/config/deploy-artisan.txt
     --skip-pull   Deploy the working tree as-is
     --backup      db:dump before migrating
     Only one deploy runs at a time (lock in .git/dock/). To deploy every push
@@ -934,6 +935,32 @@ _deploy_caches() {
     return $rc
 }
 
+# Project commands from docker/config/deploy-artisan.txt (comments and blank
+# lines skipped). Split on whitespace, never evaluated.
+deploy_artisan_commands() {
+    local file="${PROJECT_ROOT}/docker/config/deploy-artisan.txt" line
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n "$line" ]] && printf '%s\n' "$line"
+    done < "$file"
+}
+
+_deploy_artisan() {
+    local line args rc=0
+    while IFS= read -r line; do
+        echo "artisan ${line}"
+        read -r -a args <<< "$line"
+        if ! app_run php artisan "${args[@]}"; then
+            print_warning "artisan ${line} failed (./dock artisan ${line} to see why)"
+            rc=1
+        fi
+    done < <(deploy_artisan_commands)
+    return $rc
+}
+
 _deploy_migrate() {
     local out rc ran
     out="$(app_run php artisan migrate --force 2>&1)"
@@ -955,8 +982,9 @@ deploy_run() {
     if ! is_local_env && [[ "$SERVER" == "nginx" || "$SERVER" == "caddy" ]]; then sync_assets=true; fi
     [[ "$backup" == "true" ]] && is_container_running "$(db_container)" && do_backup=true
 
-    # prepare + [backup] + start_stack + [assets] + db + migrate + caches
+    # prepare + [backup] + start_stack + [assets] + db + migrate + caches + [project commands]
     total=$(( 1 + $(start_stack_steps true false) + 3 ))
+    [[ -n "$(deploy_artisan_commands)" ]] && total=$((total + 1))
     [[ "$do_backup" == "true" ]] && total=$((total + 1))
     [[ "$sync_assets" == "true" ]] && total=$((total + 1))
 
@@ -986,6 +1014,9 @@ deploy_run() {
         failed=1
     fi
     run_step "Caching config, routes, views, events + reload" _deploy_caches || caches_ok=false
+    if [[ -n "$(deploy_artisan_commands)" ]]; then
+        run_step "Project commands (deploy-artisan.txt)" _deploy_artisan || caches_ok=false
+    fi
     ui_cursor_show
 
     print_container_status
@@ -998,7 +1029,7 @@ deploy_run() {
         print_done_box "Deployed" $(( $(date +%s) - started )) ok "Release|$(deploy_release_summary)"
     else
         print_done_box "Deployed with warnings" $(( $(date +%s) - started )) warn \
-            "Release|$(deploy_release_summary)" "Caches|some failed, see the warnings above"
+            "Release|$(deploy_release_summary)" "Warnings|a cache or project command failed, see above"
     fi
 }
 

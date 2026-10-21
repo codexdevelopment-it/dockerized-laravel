@@ -1,0 +1,4 @@
+# Artisan commands ./dock deploy runs after migrations and caches, one per line,
+# as the laravel user in the app container (e.g. scout:sync-index-settings).
+# Arguments are split on spaces (no quoting). A failure is a warning, not a
+# failed deploy.

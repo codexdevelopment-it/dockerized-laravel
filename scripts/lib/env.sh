@@ -139,16 +139,23 @@ prepare_compose_env() {
     STORAGE_MOUNT_PATH="$(resolve_mount_path "${STORAGE_MOUNT_PATH:-}" storage)"
     DB_MOUNT_PATH="$(resolve_mount_path "${DB_MOUNT_PATH:-}" db-data)"
 
-    # FrankenPHP is only baked into octane images; the tag differs so switching
-    # SERVER triggers a build instead of reusing an image without the binary.
+    # Octane images build on FrankenPHP's image for the same PHP version (ZTS);
+    # the tag differs so switching SERVER triggers a build instead of reusing
+    # an image without FrankenPHP.
     if [[ "${SERVER:-artisan}" == "octane" ]]; then
         DOCK_WITH_FRANKENPHP=1 DOCK_IMAGE_SUFFIX="-octane"
+        DOCK_PHP_BASE_IMAGE="dunglas/frankenphp:${FRANKENPHP_VERSION:-1.13.0}-php${PHP_VERSION:-8.5.12}-trixie"
     else
         DOCK_WITH_FRANKENPHP=0 DOCK_IMAGE_SUFFIX=""
+        DOCK_PHP_BASE_IMAGE="php:${PHP_VERSION:-8.5.12}-fpm-trixie"
     fi
 
-    export DOCK_ENV DB_DRIVER RESTART_POLICY USER_ID GROUP_ID \
-        STORAGE_MOUNT_PATH DB_MOUNT_PATH DOCK_WITH_FRANKENPHP DOCK_IMAGE_SUFFIX
+    # "127.0.0.1:" prefix for the app's host port when APP_BIND is set (e.g.
+    # behind a reverse proxy on the host); empty publishes on every interface.
+    DOCK_APP_BIND="${APP_BIND:+${APP_BIND}:}"
+
+    export DOCK_ENV DB_DRIVER RESTART_POLICY USER_ID GROUP_ID DOCK_APP_BIND \
+        STORAGE_MOUNT_PATH DB_MOUNT_PATH DOCK_WITH_FRANKENPHP DOCK_IMAGE_SUFFIX DOCK_PHP_BASE_IMAGE
 }
 
 # -----------------------------------------------------------------------------

@@ -28,4 +28,5 @@ jobs:
       - name: Build ${{ matrix.target }} image
         run: |
           ctx=$([ "${{ matrix.target }}" = local ] && echo . || echo /tmp/app)
-          docker build --target ${{ matrix.target }} --build-arg BUILD_ENV=${{ matrix.target }} -f docker/Dockerfile "$ctx"
+          docker build --target ${{ matrix.target }} --build-arg BUILD_ENV=${{ matrix.target }} \
+            --build-context dock-build=docker/config/build -f docker/Dockerfile "$ctx"

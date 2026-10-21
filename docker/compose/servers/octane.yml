@@ -1,17 +1,13 @@
 # =============================================================================
 # octane: Laravel Octane on FrankenPHP, HTTP on APP_PORT.
 # Requires laravel/octane in composer.json (dock installs it in local if missing).
+# The image is built on dunglas/frankenphp for PHP_VERSION (see the Dockerfile),
+# so FrankenPHP reads the same php.ini files as the CLI.
 # =============================================================================
 
 services:
   app:
     ports:
-      - '${APP_PORT:-8000}:8000'
+      - '${DOCK_APP_BIND:-}${APP_PORT:-8000}:8000'
     volumes:
       - '../config/supervisor/server-octane-${DOCK_ENV:-local}.conf:/etc/supervisor/programs/20-server.conf:ro'
-      # FrankenPHP's static binary embeds its own PHP: it ignores
-      # /usr/local/etc/php/conf.d and only scans /etc/frankenphp/php.d/*.ini,
-      # otherwise falling back to defaults like post_max_size=8M. The inis hold
-      # directives only (no extension= lines), so they are safe to share.
-      - '../config/php/base.ini:/etc/frankenphp/php.d/00-base.ini:ro'
-      - '../config/php/${DOCK_ENV:-local}.ini:/etc/frankenphp/php.d/01-environment.ini:ro'

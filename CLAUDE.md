@@ -33,7 +33,7 @@ docker/
   Dockerfile             targets: local | staging | production (see header)
   AGENTS.md              shipped agent guide
   compose/               base.yml, databases/, environments/, servers/, services/
-  config/                php, supervisor, nginx, caddy, fpm, postgres (user-customisable)
+  config/                php, supervisor, nginx, caddy, fpm, postgres, build hooks (user-customisable)
 ```
 
 ## Invariants (don't break these)
@@ -45,9 +45,11 @@ docker/
 - **Compose relative paths resolve from `docker/compose/`**, not the project root. Host paths from `.env`
   (`STORAGE_MOUNT_PATH`, `DB_MOUNT_PATH`) are made absolute by `prepare_compose_env`; compose files use
   them without defaults. Any new host-path variable must go through `resolve_mount_path`.
+- `docker/compose/project.yml` (optional, project-owned, never shipped) is merged last by
+  `build_compose_args`; project services are extra `services/<name>.yml` files. Never ship either name.
 - Compose files only read variables `dock` exports. Derived ones come from `prepare_compose_env`:
   `DOCK_ENV` (local|staging|production, normalises `development`), `RESTART_POLICY`, `USER_ID`/`GROUP_ID`
-  (host IDs, never 0), `DOCK_WITH_FRANKENPHP`, `DOCK_IMAGE_SUFFIX`. Use `DOCK_ENV`, not `APP_ENV`, to pick files.
+  (host IDs, never 0), `DOCK_WITH_FRANKENPHP`, `DOCK_IMAGE_SUFFIX`, `DOCK_APP_BIND` (`APP_BIND:` or empty). Use `DOCK_ENV`, not `APP_ENV`, to pick files.
 - Container commands run as `laravel` (`app_exec`/`app_run`); root only for chown/supervisorctl
   (`--root`). Running artisan as root creates root-owned logs/caches the app can't write.
 - `app_exec` adds `-t` only when stdin and stdout are TTYs.
@@ -86,7 +88,11 @@ docker/
 
 ## Dockerfile
 
-`base` (PHP + extensions + composer + supervisor) → `app-base` (laravel user, optional FrankenPHP) →
+Project hooks: `APT_PACKAGES` + `docker/config/build/runtime.sh` (app-base) and `release.sh` (release),
+mounted from the named build context `dock-build` (compose `additional_contexts`; plain `docker build`
+needs `--build-context dock-build=docker/config/build`), because `.dockerignore` excludes `/docker`.
+
+`base` (PHP + extensions + composer + supervisor) → `app-base` (laravel user, project hooks) →
 `local` (+ Node) / `release` (code from `builder`) → `staging`, `production`. `builder` does composer
 (no-dev in production), `package:discover` (bootstrap/cache from the host is ignored), npm build, drops
 node_modules. Only `view:cache` at build time: config/route/event caches need the real `.env` (APP_KEY
@@ -101,8 +107,10 @@ server-octane-<env>). Program names used by dock: `artisan-serve`, `php-fpm`, `o
 healthcheck is `supervisorctl status`. After provisioning, `dock start` runs `supervisorctl start all`
 to revive programs that went FATAL while `vendor/` was missing.
 
-FrankenPHP's static binary embeds its own PHP and only reads `/etc/frankenphp/php.d/*.ini`;
-`servers/octane.yml` mounts the PHP inis there too.
+Octane images build `FROM dunglas/frankenphp:<FRANKENPHP_VERSION>-php<PHP_VERSION>-trixie`
+(`DOCK_PHP_BASE_IMAGE`, set by `prepare_compose_env`), others `FROM php:<PHP_VERSION>-fpm-trixie`:
+never go back to FrankenPHP's static binary, it embeds its own PHP version and extension set, so
+`PHP_VERSION` would only apply to the CLI. Caddy state lives in `/data` and `/config` (owned by laravel).
 
 ## Testing changes
 

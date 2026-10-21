@@ -12,7 +12,7 @@ services:
     image: 'nginx:${NGINX_VERSION:-stable-alpine}'
     restart: '${RESTART_POLICY:-no}'
     ports:
-      - '${APP_PORT:-8000}:80'
+      - '${DOCK_APP_BIND:-}${APP_PORT:-8000}:80'
     volumes:
       - '../config/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro'
       # Same code path as app so SCRIPT_FILENAME resolves; public/build is

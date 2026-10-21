@@ -123,6 +123,7 @@ Everything lives in `.env`. Docker-related keys:
 | `DB_DRIVER` | `mariadb` | `mariadb` · `postgres` · `pgvector` |
 | `SERVICES` | — | Comma separated: `redis,mailpit,meilisearch,phpmyadmin,soketi,gotenberg` |
 | `APP_PORT` | `8000` | Host port of the app (`caddy` uses `HTTP_PORT`/`HTTPS_PORT`) |
+| `APP_BIND` | all interfaces | e.g. `127.0.0.1`: publish `APP_PORT` on loopback only, behind a reverse proxy on the host (artisan/octane/nginx) |
 | `DOMAIN` | — | Caddy automatic HTTPS domain |
 | `BRANCH` | current | Branch pulled by `./dock deploy` |
 | `STORAGE_MOUNT_PATH` | `./storage` | Host dir for `storage/` (staging/production) |
@@ -135,7 +136,13 @@ Everything lives in `.env`. Docker-related keys:
 | `PHP_VERSION` | `8.5` | PHP minor version of the image |
 | `NODE_VERSION` | `24` | Node major (local image + asset build) |
 | `PHP_EXTENSIONS` | — | Extra extensions, e.g. `"imagick soap"` ([list](https://github.com/mlocati/docker-php-extension-installer#supported-php-extensions)) |
-| `FRANKENPHP_VERSION` | `1.13.0` | FrankenPHP binary for `SERVER=octane` |
+| `APT_PACKAGES` | — | Extra Debian packages in the app image, e.g. `"ffmpeg poppler-utils"` |
+
+For anything else the image needs, edit the build hooks in `docker/config/build/` (yours, like the rest
+of `docker/config`): `runtime.sh` runs as root in every app image before the code is copied (a Python
+venv, a binary download, ...), `release.sh` runs in staging/production images with the code in place
+(e.g. baking model weights). Files next to them are available at `/dock-build` during the build.
+| `FRANKENPHP_VERSION` | `1.13.0` | FrankenPHP image (`dunglas/frankenphp:<version>-php<PHP_VERSION>-trixie`) for `SERVER=octane` |
 | `MARIADB_VERSION`, `POSTGRES_VERSION`, `PGVECTOR_VERSION` | `11.4`, `16.15`, `0.8.7-pg17` | Database image tags (see [Databases](#databases)) |
 | `NGINX_VERSION`, `CADDY_VERSION` | `stable-alpine`, `2-alpine` | Web server image tags |
 | `REDIS_VERSION`, `MAILPIT_VERSION`, `MEILISEARCH_VERSION`, `PHPMYADMIN_VERSION`, `SOKETI_VERSION`, `GOTENBERG_VERSION` | see [Services](#services) | Service image tags |
@@ -159,8 +166,9 @@ web servers in `docker/config/{nginx,caddy,fpm}/`. Those files are yours to cust
 | `caddy` | php-fpm `:9000` | `caddy` | Automatic HTTPS for `DOMAIN` (ports 80/443) |
 | `fpm` | php-fpm `:9000` | your own | FastCGI published on `127.0.0.1:APP_PORT` only |
 
-FrankenPHP is baked only into `octane` images (tagged `<name>:<env>-octane`), so other images stay
-~100 MB smaller and switching `SERVER` rebuilds automatically.
+`octane` images are built on FrankenPHP's official image for the same `PHP_VERSION` (tagged
+`<name>:<env>-octane`): the web server, the CLI and the workers run the same PHP with the same
+extensions. Other servers use `php:<PHP_VERSION>-fpm`; switching `SERVER` rebuilds automatically.
 
 ## Databases
 
@@ -251,6 +259,8 @@ What it does:
 6. Wait for the DB healthcheck, `migrate --force`, `storage:link`, config/route/view/event caches,
    `filament:optimize` when present.
 7. Reload the server (opcache never revalidates in production) and `queue:restart`.
+8. Run the artisan commands listed in `docker/config/deploy-artisan.txt`, if any (e.g.
+   `scout:sync-index-settings`).
 
 It is idempotent: with no new commits it rebuilds and re-runs migrations. It exits non-zero if migrations fail.
 Only one deploy runs at a time (lock in `.git/dock/`).
@@ -360,7 +370,14 @@ docker/compose/databases/<DB_DRIVER>.yml         + <DB_DRIVER>-<env>.yml
 docker/compose/environments/<env>.yml            local: whole project mounted; else storage + .env
 docker/compose/servers/<SERVER>.yml              server program + front container
 docker/compose/services/<service>.yml            one per SERVICES entry
+docker/compose/ports/<service>.yml               host ports (PUBLISH_DB_PORT, PUBLISH_REDIS_PORT)
+docker/compose/project.yml                       optional, yours: always merged last
 ```
+
+Project-specific compose lives in files the toolkit never ships, so `dock update` keeps them: a new
+service as `docker/compose/services/<name>.yml` (enabled per environment through `SERVICES`), or changes
+that must apply everywhere (a custom DB image, Redis persistence, extra volumes) in
+`docker/compose/project.yml`. Relative paths in them resolve from `docker/compose/`.
 
 The Dockerfile has three targets: `local` (PHP + Node, no code: builds in seconds and never reads the build
 context), `staging` and `production` (vendor and built assets baked in; dev dependencies dropped in
@@ -368,12 +385,12 @@ production; node_modules never shipped). PHP extensions are compiled once in a s
 
 ```text
 ├── dock                     CLI
-├── scripts/lib/             colors, utils, env, checks, docker, ui, backups
+├── scripts/lib/             colors, utils, env, checks, docker, ui, cron, backups, autodeploy
 └── docker/
     ├── Dockerfile
     ├── AGENTS.md            usage guide for AI coding agents
     ├── compose/             base, databases, environments, servers, services
-    └── config/              php, supervisor, nginx, caddy, fpm, postgres
+    └── config/              php, supervisor, nginx, caddy, fpm, postgres, build hooks
 ```
 
 | | Local | Staging | Production |
