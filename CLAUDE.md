@@ -23,8 +23,11 @@ scripts/lib/
   checks.sh              check_docker, port checks, run_preflight_checks
   ui.sh                  run_step (numbered steps, spinner, log capture), step_note, print_box, fmt_duration
   docker.sh              build_compose_args/compose, app_exec/app_run/app_try, reload_app_server, app_url
+  cron.sh                crontab entries owned by dock (marker comment), cron_dock_command
   backups.sh             ./dock backups: S3 upload via aws-cli container, cron entry, retention.
                          Uses dock's db_dump_sql / db_require / cmd_db_restore / env_path.
+  autodeploy.sh          ./dock autodeploy: cron fetches origin/BRANCH, runs `dock deploy -y` when ahead.
+                         Uses dock's dock_state_dir / deploy_lock / DOCK_BIN.
 scripts/dev/             toolkit-only dev tools (not copied into projects)
 docker/
   Dockerfile             targets: local | staging | production (see header)
@@ -70,6 +73,16 @@ docker/
   S3 credentials reach the aws-cli container via `-e VAR` (environment), never argv. The cron line is
   found by its `# dock-backups:<PROJECT_ROOT>:` marker; read the crontab fully before `crontab -`.
   `BACKUP_*` values are written single-quoted (literal for phpdotenv too).
+- Cron entries (backups, autodeploy) go through `cron.sh`: marker `# dock-<kind>:<PROJECT_ROOT>:`,
+  paths checked by `cron_require_safe_paths`. Changing a cron line's format makes `status` report
+  installed entries as out of date.
+- Deploy/autodeploy state lives in `.git/dock/` (never committed or in the image). `cmd_deploy` holds
+  `deploy.lock` across its re-exec (same pid). `autodeploy run` must stay silent when nothing changes
+  and log repeated problems once (it runs every couple of minutes).
+- Risky-config checks live in `config_risks` (env.sh): `high|msg` / `warn|msg` lines, printed by
+  `validate_full_env` once per run (`DOCK_CONFIG_WARNED`) and by `doctor`. Add new checks there.
+- Never pass secrets as `docker exec -e VAR=value` (shows in `ps`): set the variable on the docker
+  command and pass `-e VAR`.
 
 ## Dockerfile
 

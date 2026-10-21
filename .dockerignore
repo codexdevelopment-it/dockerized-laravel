@@ -29,7 +29,7 @@ vendor
 public/build
 public/hot
 public/storage
-storage/app/public/*
+storage/app/*
 storage/framework/cache/*
 storage/framework/sessions/*
 storage/framework/views/*

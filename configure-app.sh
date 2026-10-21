@@ -157,7 +157,8 @@ choose() {
         read -r -p "Choice [${def}]: " choice
         choice="${choice:-$def}"
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= $# )); then
-            eval "$var=\"\${$choice%% *}\""
+            opt="${!choice}"
+            printf -v "$var" '%s' "${opt%% *}"
             return
         fi
         print_error "Enter a number between 1 and $#"
@@ -241,16 +242,18 @@ copy_toolkit() {
     cp -R "${TMP_DIR}/scripts/lib" "${TARGET_DIR}/scripts/"
     cp -R "${TMP_DIR}/docker/." "${TARGET_DIR}/docker/"
     append_missing_lines "${TMP_DIR}/.dockerignore" "${TARGET_DIR}/.dockerignore"
-    printf '/db-data\n/backups\n' > "${TMP_DIR}/gitignore.add"
+    printf '/db-data\n/backups\n/.env.backup-*\n' > "${TMP_DIR}/gitignore.add"
     append_missing_lines "${TMP_DIR}/gitignore.add" "${TARGET_DIR}/.gitignore"
     print_success "Copied dock, scripts/, docker/ and updated .dockerignore / .gitignore"
 }
 
 configure_env() {
-    local env="${TARGET_DIR}/.env" key line db_password
+    local env="${TARGET_DIR}/.env" key line db_password backup
     if [[ -f "$env" ]]; then
-        cp "$env" "${env}.backup-$(date +%Y%m%d%H%M%S)"
-        print_info "Existing .env kept (backup: $(basename "$(ls -t "${env}".backup-* | head -n1)"))"
+        backup="${env}.backup-$(date +%Y%m%d%H%M%S)"
+        cp "$env" "$backup"
+        chmod 600 "$backup"
+        print_info "Existing .env kept (backup: $(basename "$backup"), git-ignored; delete it once checked)"
         # Add the dock section for keys the project doesn't have yet.
         while IFS= read -r line; do
             [[ "$line" =~ ^([A-Z_]+)= ]] || continue

@@ -30,6 +30,7 @@ load_env() {
         return 1
     fi
     print_verbose "Loading environment from ${env_file}"
+    DOCK_ENV_FILE="$env_file"
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         line="${line%$'\r'}"
@@ -191,17 +192,114 @@ validate_full_env() {
         print_error "phpmyadmin only works with DB_DRIVER=mariadb (remove it from SERVICES)"
         errors=$((errors + 1))
     fi
-    if [[ "${SERVER:-}" == "artisan" ]] && ! is_local_env; then
-        print_warning "SERVER=artisan is a development server; use octane, nginx or caddy in ${APP_ENV}"
-    fi
-    if ! is_local_env && [[ "${APP_DEBUG:-false}" == "true" ]]; then
-        print_warning "APP_DEBUG=true in ${APP_ENV}: stack traces and env values are exposed to visitors"
-    fi
-    if [[ "$operation" == "deploy" && "${DB_PASSWORD:-}" == "password" ]]; then
-        print_warning "DB_PASSWORD is still the template default 'password'"
+    _validate_mount_paths || errors=$((errors + 1))
+
+    # Printed once per run: deploy re-executes itself after pulling.
+    if [[ -z "${DOCK_CONFIG_WARNED:-}" ]]; then
+        print_config_risks
+        DOCK_CONFIG_WARNED=1
+        export DOCK_CONFIG_WARNED
     fi
 
     return "$errors"
+}
+
+# Bind mounts are chowned recursively by deploy and the DB writes its files
+# there: refuse system directories, the project itself and overlapping paths.
+_validate_mount_paths() {
+    local storage db p bad=0
+    storage="$(abs_path "${STORAGE_MOUNT_PATH:-storage}" "$PROJECT_ROOT")"
+    db="$(abs_path "${DB_MOUNT_PATH:-db-data}" "$PROJECT_ROOT")"
+    for p in "$storage" "$db"; do
+        case "$p" in
+            ""|/|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/mnt|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var|/var/lib|/Users|"${HOME%/}"|"$PROJECT_ROOT")
+                print_error "Unsafe mount path '${p}' (STORAGE_MOUNT_PATH / DB_MOUNT_PATH): use a dedicated directory"
+                bad=1 ;;
+        esac
+    done
+    if [[ "$storage" == "$db" || "$db" == "$storage"/* || "$storage" == "$db"/* ]]; then
+        print_error "STORAGE_MOUNT_PATH and DB_MOUNT_PATH must not contain each other (${storage}, ${db})"
+        bad=1
+    fi
+    return "$bad"
+}
+
+_is_loopback() { case "$1" in 127.*|localhost|::1|"[::1]") return 0 ;; *) return 1 ;; esac; }
+
+# config_risks: one "<high|warn>|<message>" line per suspicious setting.
+# high: exposes data or allows code execution; warn: probably a mistake.
+# Printed by start/deploy (print_config_risks) and doctor.
+config_risks() {
+    local bind="${SERVICES_BIND:-127.0.0.1}" level=high raw
+    is_local_env && level=warn
+
+    if ! _is_loopback "$bind"; then
+        [[ "${SERVER:-}" == "fpm" ]] \
+            && echo "${level}|SERVER=fpm publishes FastCGI on ${bind}:${APP_PORT:-9000}: anyone reaching it can run PHP code. Keep SERVICES_BIND=127.0.0.1"
+        publish_db_port \
+            && echo "${level}|The database port is published on ${bind} (Docker bypasses ufw). Set PUBLISH_DB_PORT=false or SERVICES_BIND=127.0.0.1"
+        has_service redis && publish_redis_port \
+            && echo "${level}|Redis (no password) is published on ${bind}. Set PUBLISH_REDIS_PORT=false or SERVICES_BIND=127.0.0.1"
+        has_service phpmyadmin \
+            && echo "${level}|phpMyAdmin logs in by itself and is published on ${bind}: anyone reaching it can read the database. Keep SERVICES_BIND=127.0.0.1 (SSH tunnel)"
+        is_local_env || echo "warn|SERVICES_BIND=${bind} publishes service ports on that interface (Docker bypasses ufw)"
+    fi
+
+    # phpdotenv expands ${VAR} in double-quoted and unquoted values; docker
+    # compose and dock don't, so the app and the DB would disagree.
+    raw="$(get_env_value "${DOCK_ENV_FILE:-/dev/null}" DB_PASSWORD)"
+    if [[ "$raw" == *"\${"* ]] &&! grep -qE "^DB_PASSWORD='" "${DOCK_ENV_FILE:-/dev/null}" 2>/dev/null; then
+        echo "warn|DB_PASSWORD contains '\${': Laravel expands it, the database doesn't. Single-quote the value"
+    fi
+
+    is_local_env && return 0
+
+    _is_true "${APP_DEBUG:-false}" \
+        && echo "high|APP_DEBUG=true in ${APP_ENV}: stack traces and env values are shown to visitors"
+    case "${DB_PASSWORD:-}" in
+        ""|password|secret|root|"{{"*) echo "high|DB_PASSWORD is empty or a well-known default" ;;
+        *) (( ${#DB_PASSWORD} < 12 )) && echo "warn|DB_PASSWORD is short (${#DB_PASSWORD} chars): use 16+ random characters" ;;
+    esac
+    [[ "${DB_USERNAME:-}" == "root" ]] && echo "warn|DB_USERNAME=root: use a dedicated user (e.g. app)"
+    if has_service meilisearch; then
+        if [[ "${MEILISEARCH_KEY:-masterkey}" == "masterkey" || ${#MEILISEARCH_KEY} -lt 16 ]]; then
+            echo "high|MEILISEARCH_KEY is the default or shorter than 16 chars"
+        fi
+        [[ "${MEILI_ENV:-development}" != "production" ]] \
+            && echo "warn|MEILI_ENV is not production: Meilisearch serves its search preview UI"
+    fi
+    if has_service soketi; then
+        case "${PUSHER_APP_SECRET:-some-app-secret}" in
+            some-app-secret|app-secret)
+                echo "high|Soketi is public with the default PUSHER_APP_SECRET: anyone can sign private channel subscriptions" ;;
+        esac
+    fi
+    [[ "${SERVER:-artisan}" == "artisan" ]] \
+        && echo "warn|SERVER=artisan is a development server: use octane, nginx or caddy in ${APP_ENV}"
+    if [[ "${SERVER:-}" == "caddy" && ( -z "${DOMAIN:-}" || "${DOMAIN}" == "localhost" ) ]]; then
+        echo "warn|SERVER=caddy without DOMAIN: Caddy serves a self-signed certificate for localhost"
+    fi
+    case "${APP_URL:-}" in
+        ""|http://localhost*|http://127.0.0.1*)
+            echo "warn|APP_URL is '${APP_URL:-}': generated links and redirects point there" ;;
+    esac
+    [[ "${MAIL_HOST:-}" == "mailpit" ]] \
+        && echo "warn|MAIL_HOST=mailpit in ${APP_ENV}: emails are caught by Mailpit, never delivered"
+    if is_production_env && [[ "${LOG_LEVEL:-}" == "debug" ]]; then
+        echo "warn|LOG_LEVEL=debug in production: logs grow fast and may hold sensitive data"
+    fi
+    return 0
+}
+
+print_config_risks() {
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            "")      ;;
+            high\|*) print_warning "${RED}${BOLD}Insecure:${NC} ${line#*|}" ;;
+            *)       print_warning "${line#*|}" ;;
+        esac
+    done < <(config_risks)
 }
 
 # One line under the header: env · server · db · services · container

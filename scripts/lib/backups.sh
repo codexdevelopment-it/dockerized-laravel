@@ -24,6 +24,7 @@ SCRIPT_LIB_DIR="${SCRIPT_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 source "${SCRIPT_LIB_DIR}/colors.sh"
 source "${SCRIPT_LIB_DIR}/utils.sh"
 source "${SCRIPT_LIB_DIR}/ui.sh"
+source "${SCRIPT_LIB_DIR}/cron.sh"
 
 BACKUP_DEFAULT_SCHEDULE="0 3 * * *"
 BACKUP_DEFAULT_KEEP_DAYS=30
@@ -253,47 +254,24 @@ backup_configure() {
     backup_should_ask "$all" empty BACKUP_SCHEDULE && backup_ask BACKUP_SCHEDULE "Schedule, cron syntax in server time" "${BACKUP_SCHEDULE:-$BACKUP_DEFAULT_SCHEDULE}"
 }
 
+# 5 fields of digits, names, * / , - (or @daily & co.): nothing that the
+# shell part of the crontab line could interpret.
 backup_valid_schedule() {
-    local fields
-    [[ "$1" != *%* && "$1" != *"'"* ]] || return 1
-    fields="$(printf '%s\n' "$1" | awk '{ print NF }')"
-    [[ "$fields" == 5 || ( "$fields" == 1 && "$1" == @* ) ]]
+    [[ "$1" =~ ^@[a-z]+$ || "$1" =~ ^[0-9A-Za-z*/,-]+([[:space:]]+[0-9A-Za-z*/,-]+){4}$ ]]
 }
 
 # -----------------------------------------------------------------------------
-# cron
+# cron (scripts/lib/cron.sh)
 # -----------------------------------------------------------------------------
 
-# Identifies this project's entry; the trailing ':' keeps /srv/app from
-# matching /srv/app2.
-backup_cron_marker() { printf '# dock-backups:%s:' "$PROJECT_ROOT"; }
+backup_cron_entry() { cron_entry backups; }
 
-backup_crontab_read() { crontab -l 2>/dev/null; }
-
-backup_cron_entry() { command_exists crontab && backup_crontab_read | grep -F -- "$(backup_cron_marker)"; }
-
-# cron runs with a minimal PATH: put docker's directory first.
 backup_cron_line() {
-    local env_flag=""
-    [[ "$ENV_FILE" != ".env" ]] && env_flag="-e '${ENV_FILE}' "
-    printf "%s cd '%s' && PATH='%s:/usr/local/bin:/usr/bin:/bin' NO_COLOR=1 ./dock %sbackups run >> backups/backup.log 2>&1 %s" \
-        "$BACKUP_SCHEDULE" "$PROJECT_ROOT" "$(dirname "$(command -v docker)")" "$env_flag" "$(backup_cron_marker)"
+    printf '%s %s >> backups/backup.log 2>&1 %s' \
+        "$BACKUP_SCHEDULE" "$(cron_dock_command "" backups run)" "$(cron_marker backups)"
 }
 
-# The current crontab is read completely before `crontab -` replaces it.
-backup_crontab_without_entry() { backup_crontab_read | grep -vF -- "$(backup_cron_marker)"; }
-
-backup_cron_install() {
-    local others
-    others="$(backup_crontab_without_entry)"
-    { [[ -n "$others" ]] && printf '%s\n' "$others"; backup_cron_line; echo; } | crontab -
-}
-
-backup_cron_remove() {
-    local others
-    others="$(backup_crontab_without_entry)"
-    { [[ -n "$others" ]] && printf '%s\n' "$others"; } | crontab -
-}
+backup_cron_install() { cron_install backups "$(backup_cron_line)"; }
 
 # -----------------------------------------------------------------------------
 # Run state: backups/last-run holds "<ok|failed> <UTC time> <detail>"
@@ -304,24 +282,8 @@ backup_record() {
     printf '%s %s %s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" > "$(backup_state)"
 }
 
-# Only one run at a time: a lock dir holding the owner's pid (stale locks of
-# dead processes are taken over).
-backup_lock() {
-    local lock pid
-    lock="$(backup_dir)/.lock"
-    mkdir -p "$(backup_dir)"
-    if ! mkdir "$lock" 2>/dev/null; then
-        pid="$(cat "${lock}/pid" 2>/dev/null)"
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-            print_error "Another backup is running (pid ${pid})"
-            return 1
-        fi
-        rm -rf "$lock" && mkdir "$lock" || return 1
-    fi
-    echo $$ > "${lock}/pid"
-    # shellcheck disable=SC2064  # expand now: the path is fixed
-    trap "rm -rf '${lock}'" EXIT
-}
+# Only one run at a time.
+backup_lock() { acquire_lock "$(backup_dir)/.lock" "backup"; }
 
 # Keep the cron log bounded.
 backup_trim_log() {
@@ -438,10 +400,7 @@ cmd_backups_enable() {
     done
     require_env_light || return 1
     command_exists crontab || { print_error "crontab not found: install cron (Debian/Ubuntu: apt install cron)"; return 1; }
-    if [[ "$PROJECT_ROOT" == *[\'%]* ]]; then
-        print_error "The project path can't contain ' or % (cron): ${PROJECT_ROOT}"
-        return 1
-    fi
+    cron_require_safe_paths || return 1
 
     print_header "Backups · ${APP_NAME:-$CONTAINER_NAME}"
     [[ -n "$schedule" ]] && backup_save BACKUP_SCHEDULE "$schedule"
@@ -493,7 +452,7 @@ cmd_backups_disable() {
         print_info "No backup cron job for this project"
         return 0
     fi
-    backup_cron_remove || return 1
+    cron_remove backups || return 1
     print_success "Cron job removed (settings in .env and remote backups are kept)"
 }
 

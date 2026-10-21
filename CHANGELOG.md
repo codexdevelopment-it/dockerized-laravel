@@ -4,6 +4,21 @@
 
 ### Added
 
+- `./dock autodeploy`: continuous deployment from the host's cron. Every `AUTODEPLOY_INTERVAL` minutes
+  (default 2) it fetches `origin/BRANCH` and runs `./dock deploy -y` when there are new commits.
+  `enable [--every N]` checks that git can fetch without a terminal (no ssh-agent, as under cron) and
+  installs the cron job; `disable`, `status`, `logs`, `run`. Failed deploys are not retried for the same
+  commit; repeated problems are logged once. State and log live in `.git/dock/`. `./dock deploy` shows
+  the command to enable it while it is off (`AUTODEPLOY=false` hides the hint); `doctor` reports it.
+- Deploys take a lock (`.git/dock/deploy.lock`): a manual deploy and an auto-deploy never overlap.
+- Risky-setting warnings on `start`/`deploy`/`config` and in `doctor` (failures for the insecure
+  ones): FastCGI, DB, Redis or phpMyAdmin published on a non-loopback `SERVICES_BIND`, `APP_DEBUG`,
+  default/short `DB_PASSWORD`, `DB_USERNAME=root`, default `MEILISEARCH_KEY`, `MEILI_ENV`, default
+  Soketi secret, Caddy without `DOMAIN`, localhost `APP_URL`, `MAIL_HOST=mailpit`, `LOG_LEVEL=debug`,
+  `DB_PASSWORD` containing `${`. Printed once per deploy (not again after the re-exec).
+- `STORAGE_MOUNT_PATH` / `DB_MOUNT_PATH` pointing at `/`, a system directory, `$HOME`, the project root
+  or at each other are refused (deploy runs `chown -R` on the storage path).
+
 - `./dock backups`: encrypted off-site DB backups on S3-compatible storage (AWS, DigitalOcean Spaces, R2,
   MinIO). `enable` asks for the missing `BACKUP_*` settings, saves them to `.env`, checks bucket access and
   installs a host cron job (`BACKUP_SCHEDULE`, default `0 3 * * *`); `disable`, `status`, `run`, `list`,
@@ -19,12 +34,37 @@
 
 ### Fixed
 
+- The terminal cursor stayed hidden when a step of `start`, `restart` or `deploy` failed.
+- `db:dump` printed its result twice; the migration count of `deploy` included "Creating migration table".
+- `./dock db`, `db:dump`, `db:restore`: the DB password was passed as `docker exec -e VAR=value`, visible
+  in the host's process list. It now reaches docker through the environment.
+- nginx passed every `*.php` under `public/` to php-fpm, so an uploaded `.php` reachable through
+  `public/storage` could be executed. Only `/index.php` runs now (like the Caddyfile). `docker/config`
+  is yours: existing projects should copy the change from `docker/config/nginx/default.conf`.
+- nginx static asset responses lost the security headers (`add_header` in a location drops the
+  server-level ones).
+- The installer's `.env.backup-*` (secrets) was world-readable when `.env` was and not git-ignored: now
+  `chmod 600` and added to `.gitignore`.
+- `.dockerignore` excludes all of `storage/app/*` (it only excluded `storage/app/public`), so private
+  uploads on the host are no longer copied into staging/production images. Existing projects: replace
+  `storage/app/public/*` with `storage/app/*` in `.dockerignore`.
+- `BACKUP_SCHEDULE` fields are restricted to cron characters, and paths written into crontab lines
+  (project root, `-e` env file) are checked for `'` and `%`.
+
 - **Staging builds failed** at `composer install` with exit code 1 and no output:
   `NO_DEV=$([ "$BUILD_ENV" = "production" ] && echo --no-dev)` takes the exit status of the failed test
   when `BUILD_ENV` is not `production`, so `&&` skipped composer. Now `|| true`. CI builds the `staging`
   target too.
 
 ### Changed
+
+- `deploy` preview: risky settings are listed in a "Warnings" section next to the confirmation (not above
+  the header); the URL is `APP_URL` in staging/production; `--skip-pull` shows the deployed commit and
+  says the working tree is deployed as-is (uncommitted tracked changes included) instead of "no new
+  commits"; the new-migrations hint doesn't suggest `--backup` when it was passed.
+- `deploy` final box shows the release (`abc1234 → def5678 (3 commits)`) and turns yellow ("Deployed
+  with warnings") when a cache step failed.
+- `restart` runs the pre-flight checks and rejects unknown options.
 
 - The `.env` template lists every image pin on its own line with its default (`PHP_VERSION`,
   `NODE_VERSION`, `FRANKENPHP_VERSION`, `MARIADB_VERSION`, `POSTGRES_VERSION`, `PGVECTOR_VERSION`,

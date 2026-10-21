@@ -37,7 +37,9 @@ source "${SCRIPT_LIB_DIR}/env.sh"
 source "${SCRIPT_LIB_DIR}/checks.sh"
 source "${SCRIPT_LIB_DIR}/docker.sh"
 source "${SCRIPT_LIB_DIR}/ui.sh"
+source "${SCRIPT_LIB_DIR}/cron.sh"
 source "${SCRIPT_LIB_DIR}/backups.sh"
+source "${SCRIPT_LIB_DIR}/autodeploy.sh"
 
 VERBOSE=false
 QUIET=false
@@ -100,6 +102,8 @@ $(echo -e "${BOLD}BACKUPS${NC}") (encrypted, off-site on S3 / Spaces / R2 / MinI
 
 $(echo -e "${BOLD}OPERATIONS${NC}")
     deploy [-y] [--skip-pull] [--backup]   Pull, build, migrate, cache, reload
+    autodeploy enable [--every N]  Cron: deploy new commits of BRANCH every N min (default 2)
+    autodeploy disable|status|logs [-f]
     doctor                         Diagnose configuration and runtime problems
     update [--check]               Update dock, scripts and compose files from upstream
     help [command] | version
@@ -154,6 +158,28 @@ dock deploy [-y|--yes] [--skip-pull] [--backup]
       6. reload the app server
     --skip-pull   Deploy the working tree as-is
     --backup      db:dump before migrating
+    Only one deploy runs at a time (lock in .git/dock/). To deploy every push
+    automatically: ./dock autodeploy enable
+EOF
+        ;;
+        autodeploy) cat <<'EOF'
+dock autodeploy <command>
+    Continuous deployment from the server's cron, for staging/production:
+    every AUTODEPLOY_INTERVAL minutes (default 2) it fetches origin/BRANCH and,
+    when there are new commits, runs ./dock deploy -y with the APP_ENV of .env.
+
+    enable [--every N]    Check that git can fetch without a terminal (as cron
+                          will: no ssh-agent, no passphrase), install the cron job.
+                          --every saves AUTODEPLOY_INTERVAL (minutes, 1-59)
+    disable               Remove the cron job
+    status                Cron state, branch, last check, last deploy, problems
+    logs [-f] [-n N]      Deploy output (.git/dock/autodeploy.log)
+    run                   What cron runs (deploys only when origin is ahead)
+
+    A failed deploy is not retried for the same commit: push a fix or run
+    ./dock deploy. Repeated problems (fetch failing, diverged checkout) are
+    logged once. AUTODEPLOY=false in .env hides the hint shown by deploy.
+    Anyone who can push to BRANCH deploys to this server: protect the branch.
 EOF
         ;;
         db|db:dump|db:restore) cat <<'EOF'
@@ -215,6 +241,11 @@ EOF
 env_path() {
     if [[ "$ENV_FILE" == /* ]]; then echo "$ENV_FILE"; else echo "${PROJECT_ROOT}/${ENV_FILE}"; fi
 }
+
+# Per-checkout state of deploy/autodeploy: inside .git, so it is never
+# committed, never in the image and survives `git clean`.
+dock_state_dir() { echo "${PROJECT_ROOT}/.git/dock"; }
+deploy_lock()    { echo "$(dock_state_dir)/deploy.lock"; }
 
 # load + validate .env. require_env [start|deploy]
 require_env() {
@@ -365,11 +396,17 @@ service_links() {
     done
 }
 
-# print_done_box <title> <seconds> [color]
+# print_done_box <title> <seconds> [ok|warn] ["Name|value"...]: extra rows
+# come before the service links.
 print_done_box() {
-    local title="$1" seconds="$2" color="${3:-$GREEN}" lines=() link
-    lines+=("${color}${BOLD}${CHECKMARK} ${title}${NC} ${DIM}in $(fmt_duration "$seconds")${NC}")
+    local title="$1" seconds="$2" color="$GREEN" icon="$CHECKMARK" lines=() name link row
+    [[ "${3:-ok}" == "warn" ]] && color="$YELLOW" icon="!"
+    shift 3 2>/dev/null || shift $#
+    lines+=("${color}${BOLD}${icon} ${title}${NC} ${DIM}in $(fmt_duration "$seconds")${NC}")
     lines+=("")
+    for row in "$@"; do
+        lines+=("$(printf "${GRAY}%-12s${NC} %s" "${row%%|*}" "${row#*|}")")
+    done
     while IFS='|' read -r name link; do
         lines+=("$(printf "${GRAY}%-12s${NC} %s" "$name" "$link")")
     done < <(service_links)
@@ -431,10 +468,17 @@ cmd_stop() {
 
 cmd_restart() {
     local build=false started=$SECONDS
-    [[ "${1:-}" == "--build" ]] && build=true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --build) build=true ;;
+            *)       print_error "Unknown option for restart: $1 (only --build)"; return 1 ;;
+        esac
+        shift
+    done
     require_env start || return 1
     print_header "${APP_NAME:-$CONTAINER_NAME}"
     print_env_summary
+    run_preflight_checks || return 1
     print_nl
     ui_cursor_hide
     steps_begin $(( $(start_stack_steps "$build" false) + 1 ))
@@ -580,7 +624,8 @@ cmd_fresh() {
 db_container() { echo "${CONTAINER_NAME}-db"; }
 
 # db_exec [-i|-it] <client args...>: runs the DB client with credentials passed
-# through the environment (never visible in `ps`). -it degrades to -i when
+# through the environment: `-e VAR` without a value copies ours, so the
+# password never shows up in docker's argv (`ps`). -it degrades to -i when
 # stdin/stdout is not a terminal (`echo "select 1" | ./dock db`).
 db_exec() {
     local tty=()
@@ -589,9 +634,9 @@ db_exec() {
         -it) tty=(-i); [[ -t 0 && -t 1 ]] && tty=(-it); shift ;;
     esac
     if is_postgres_driver; then
-        docker exec "${tty[@]}" -e PGPASSWORD="${DB_PASSWORD}" "$(db_container)" "$@"
+        PGPASSWORD="${DB_PASSWORD}" docker exec "${tty[@]}" -e PGPASSWORD "$(db_container)" "$@"
     else
-        docker exec "${tty[@]}" -e MYSQL_PWD="${DB_PASSWORD}" "$(db_container)" "$@"
+        MYSQL_PWD="${DB_PASSWORD}" docker exec "${tty[@]}" -e MYSQL_PWD "$(db_container)" "$@"
     fi
 }
 
@@ -642,8 +687,11 @@ cmd_db_dump() {
         print_error "Dump failed"
         return 1
     fi
-    print_success "Dump written: ${file#"${PROJECT_ROOT}"/} ($(du -h "$file" | cut -f1 | tr -d ' '))"
-    step_note "${file#"${PROJECT_ROOT}"/} ($(du -h "$file" | cut -f1 | tr -d ' '))"
+    if in_step; then
+        step_note "${file#"${PROJECT_ROOT}"/} ($(du -h "$file" | cut -f1 | tr -d ' '))"
+    else
+        print_success "Dump written: ${file#"${PROJECT_ROOT}"/} ($(du -h "$file" | cut -f1 | tr -d ' '))"
+    fi
 }
 
 cmd_db_restore() {
@@ -694,19 +742,26 @@ cmd_deploy() {
         print_info "Clone the app repo on the server and run ./dock deploy inside it"
         return 1
     fi
+    # Risky settings are listed in the preview, next to the confirmation.
+    DOCK_CONFIG_WARNED=1
+    export DOCK_CONFIG_WARNED
     require_env deploy || return 1
     cd "$PROJECT_ROOT" || return 1
+    # Kept across the exec below (same pid), released on exit.
+    acquire_lock "$(deploy_lock)" "deploy" || return 1
 
     DOCK_DEPLOY_STARTED="${DOCK_DEPLOY_STARTED:-$(date +%s)}"
-    export DOCK_DEPLOY_STARTED
+    DOCK_DEPLOY_FROM="${DOCK_DEPLOY_FROM:-$(git rev-parse --short HEAD 2>/dev/null)}"
+    export DOCK_DEPLOY_STARTED DOCK_DEPLOY_FROM
 
     if [[ "$after_pull" != "true" ]]; then
         print_header "Deploy · ${APP_NAME:-$CONTAINER_NAME}"
+        deploy_autodeploy_hint
         if is_local_env; then
             print_warning "APP_ENV=${APP_ENV}: deploy is meant for staging/production"
             confirm "Continue anyway?" || return 1
         fi
-        deploy_preview "$skip_pull" || return 1
+        deploy_preview "$skip_pull" "$backup" || return 1
 
         if [[ "$skip_pull" != "true" ]]; then
             print_nl
@@ -725,9 +780,22 @@ cmd_deploy() {
     deploy_run "$backup"
 }
 
+# Manual deploys point at auto-deploy while it isn't set up.
+deploy_autodeploy_hint() {
+    local entry
+    [[ -z "${DOCK_AUTODEPLOY:-}" ]] && ! is_local_env && autodeploy_hint_wanted && command_exists crontab || return 0
+    entry="$(autodeploy_cron_entry)"
+    if [[ -z "$entry" ]]; then
+        print_info "Auto-deploy is off. To deploy new commits of $(autodeploy_branch) every $(autodeploy_interval) min:"
+        print_msg "    ${BOLD}./dock autodeploy enable${NC}  ${DIM}(AUTODEPLOY=false in .env hides this)${NC}"
+    elif [[ "$entry" != "$(autodeploy_cron_line)" ]]; then
+        print_info "Auto-deploy cron is out of date with .env: ./dock autodeploy enable"
+    fi
+}
+
 # Fetch, show what will be deployed, confirm.
 deploy_preview() {
-    local skip_pull="$1" branch current target count
+    local skip_pull="$1" backup="$2" branch current target count
     branch="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
     current="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     target="$current"
@@ -756,7 +824,13 @@ deploy_preview() {
     print_kv "DB data" "$(short_path "$DB_MOUNT_PATH")"
 
     print_section "${ICON_PACKAGE} Changes"
-    if [[ "$current" == "$target" ]]; then
+    if [[ "$skip_pull" == "true" ]]; then
+        print_kv "Commit" "${current} $(git log -1 --pretty=%s 2>/dev/null)"
+        print_info "--skip-pull: deploying the working tree as-is (no fetch, no pull)"
+        if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            print_warning "Uncommitted changes in tracked files are deployed too"
+        fi
+    elif [[ "$current" == "$target" ]]; then
         print_info "Already at ${current}: no new commits (image is rebuilt, migrations re-run)"
     else
         count="$(git rev-list --count "HEAD..origin/${branch}" 2>/dev/null || echo "?")"
@@ -767,11 +841,20 @@ deploy_preview() {
             "HEAD..origin/${branch}" | head -15
         print_kv "Files" "$(git diff --name-only "HEAD..origin/${branch}" | wc -l | tr -d ' ')"
         if git diff --name-only "HEAD..origin/${branch}" | grep -q 'database/migrations/'; then
-            print_warning "Includes new migrations (consider --backup)"
+            if [[ "$backup" == "true" ]]; then
+                print_info "Includes new migrations (the database is dumped first: --backup)"
+            else
+                print_warning "Includes new migrations (consider --backup)"
+            fi
         fi
     fi
     if [[ "$skip_pull" != "true" && -n "$(git status --porcelain --untracked-files=no)" ]]; then
         print_warning "Local modifications in tracked files: they will be stashed and re-applied"
+    fi
+
+    if [[ -n "$(config_risks)" ]]; then
+        print_section "${ICON_WARN}Warnings"
+        print_config_risks
     fi
 
     [[ "${DOCK_ASSUME_YES:-false}" == "true" ]] && return 0
@@ -857,7 +940,7 @@ _deploy_migrate() {
     rc=$?
     echo "$out"
     [[ $rc -ne 0 ]] && return $rc
-    ran="$(echo "$out" | _ui_clean | grep -E ' DONE' | awk '{print $1}')"
+    ran="$(echo "$out" | _ui_clean | grep -E ' DONE' | grep -v 'Creating migration table' | awk '{print $1}')"
     if [[ -z "$ran" ]]; then
         step_note "nothing to migrate"
     else
@@ -867,7 +950,7 @@ _deploy_migrate() {
 
 deploy_run() {
     local backup="$1" failed=0 total started="${DOCK_DEPLOY_STARTED:-$(date +%s)}"
-    local sync_assets=false do_backup=false
+    local sync_assets=false do_backup=false caches_ok=true
 
     if ! is_local_env && [[ "$SERVER" == "nginx" || "$SERVER" == "caddy" ]]; then sync_assets=true; fi
     [[ "$backup" == "true" ]] && is_container_running "$(db_container)" && do_backup=true
@@ -889,20 +972,20 @@ deploy_run() {
         print_warning "Database not running yet: no backup taken"
     fi
 
-    start_stack true false || { ui_cursor_show; return 1; }
+    start_stack true false || return 1
 
     if [[ "$sync_assets" == "true" ]]; then
         run_step "Syncing public/build to the host" _deploy_sync_assets \
             || print_warning "Asset sync failed: CSS/JS may 404"
     fi
-    run_step "Waiting for the database" wait_for_db 90 || { ui_cursor_show; return 1; }
+    run_step "Waiting for the database" wait_for_db 90 || return 1
 
     if run_step "Running migrations" _deploy_migrate; then
         :
     else
         failed=1
     fi
-    run_step "Caching config, routes, views, events + reload" _deploy_caches || true
+    run_step "Caching config, routes, views, events + reload" _deploy_caches || caches_ok=false
     ui_cursor_show
 
     print_container_status
@@ -910,7 +993,25 @@ deploy_run() {
         print_box "$RED" "${RED}${BOLD}${CROSSMARK} Deployed with errors${NC}" "" "Migrations failed: the new code is live on the old schema." "Fix, then: ./dock deploy --skip-pull -y"
         return 1
     fi
-    print_done_box "Deployed $(git rev-parse --short HEAD 2>/dev/null)" $(( $(date +%s) - started ))
+    autodeploy_record ok "$(git rev-parse HEAD 2>/dev/null)" "$([[ -n "${DOCK_AUTODEPLOY:-}" ]] && echo auto || echo manual)"
+    if [[ "$caches_ok" == "true" ]]; then
+        print_done_box "Deployed" $(( $(date +%s) - started )) ok "Release|$(deploy_release_summary)"
+    else
+        print_done_box "Deployed with warnings" $(( $(date +%s) - started )) warn \
+            "Release|$(deploy_release_summary)" "Caches|some failed, see the warnings above"
+    fi
+}
+
+# "abc1234 → def5678 (3 commits)" since the deploy started.
+deploy_release_summary() {
+    local from="${DOCK_DEPLOY_FROM:-}" to count
+    to="$(git rev-parse --short HEAD 2>/dev/null)"
+    if [[ -z "$from" || "$from" == "$to" ]]; then
+        echo "${to} (no new commits)"
+        return
+    fi
+    count="$(git rev-list --count "${from}..${to}" 2>/dev/null || echo "?")"
+    echo "${from} → ${to} (${count} commit$([[ "$count" == 1 ]] || echo s))"
 }
 
 # =============================================================================
@@ -922,6 +1023,7 @@ cmd_doctor() {
     _ok()   { print_msg "  ${GREEN}${CHECKMARK}${NC} $*"; }
     _warn() { print_msg "  ${YELLOW}!${NC} $*"; warnings=$((warnings + 1)); }
     _fail() { print_msg "  ${RED}${CROSSMARK}${NC} $*"; problems=$((problems + 1)); }
+    _note() { print_msg "  ${DIM}- $*${NC}"; }
 
     print_header "Doctor"
 
@@ -940,14 +1042,16 @@ cmd_doctor() {
         if compose config -q 2>/dev/null; then _ok "Compose config resolves"; else _fail "docker compose config failed: ./dock config"; fi
         [[ -n "$(get_env_value "$(env_path)" APP_KEY)" ]] && _ok "APP_KEY set" || _warn "APP_KEY empty (./dock start generates it locally, deploy in production)"
         if ! is_local_env; then
-            [[ "${APP_DEBUG:-}" == "true" ]] && _fail "APP_DEBUG=true outside local" || _ok "APP_DEBUG off"
-            [[ "${DB_PASSWORD:-}" == "password" ]] && _fail "DB_PASSWORD is the template default" || _ok "DB_PASSWORD customised"
             [[ "$(ls -n "$(env_path)" | awk '{print $1}')" == "-rw-------"* ]] && _ok ".env is 600" || _warn ".env readable by others (chmod 600 .env)"
-            if has_service meilisearch && [[ "${MEILISEARCH_KEY:-masterkey}" == "masterkey" ]]; then _fail "MEILISEARCH_KEY is the default"; fi
         fi
-        if [[ "${SERVICES_BIND:-127.0.0.1}" == "0.0.0.0" ]] && ! is_local_env; then
-            _warn "SERVICES_BIND=0.0.0.0 publishes DB/Redis/... on every interface"
-        fi
+        f="$(config_risks)"
+        [[ -z "$f" ]] && _ok "No risky settings (APP_DEBUG, passwords, published ports, ...)"
+        while IFS= read -r f; do
+            case "$f" in
+                high\|*) _fail "${f#*|}" ;;
+                warn\|*) _warn "${f#*|}" ;;
+            esac
+        done <<< "$f"
     else
         _fail "$(env_path) not found"
     fi
@@ -976,6 +1080,21 @@ cmd_doctor() {
         esac
         f="$(find "$(backup_pending)" -name '*.sql.gz.enc' 2>/dev/null | wc -l | tr -d ' ')"
         [[ "$f" -gt 0 ]] && _warn "${f} backup(s) waiting for upload in backups/pending/"
+    fi
+
+    if [[ -d "${PROJECT_ROOT}/.git" ]] && ! is_local_env && command_exists crontab; then
+        print_section "Auto-deploy"
+        f="$(autodeploy_cron_entry)"
+        if [[ -z "$f" ]]; then
+            autodeploy_hint_wanted && _note "Off (./dock autodeploy enable)"
+        elif [[ "$f" != "$(autodeploy_cron_line)" ]]; then
+            _warn "Cron job out of date with .env (./dock autodeploy enable)"
+        else
+            _ok "Every $(autodeploy_interval) min from origin/$(autodeploy_branch)"
+        fi
+        [[ -f "$(autodeploy_error)" ]] && _fail "$(cat "$(autodeploy_error)")"
+        f="$(cut -d' ' -f1,2 "$(autodeploy_state)" 2>/dev/null)"
+        [[ "$f" == "failed "* ]] && _fail "Last auto-deploy of ${f#failed } failed: ./dock autodeploy logs"
     fi
 
     print_section "Runtime"
@@ -1137,6 +1256,8 @@ main() {
 
     cd "$PROJECT_ROOT" || exit 1
 
+    # Steps hide the cursor: show it again however the command ends.
+    trap on_exit EXIT
     case "$COMMAND" in
         "")                 show_help ;;
         start|up)           cmd_start "${ARGS[@]}" ;;
@@ -1163,6 +1284,7 @@ main() {
         db:restore)         cmd_db_restore "${ARGS[@]}" ;;
         backups|backup)     cmd_backups "${ARGS[@]}" ;;
         deploy)             cmd_deploy "${ARGS[@]}" ;;
+        autodeploy)         cmd_autodeploy "${ARGS[@]}" ;;
         doctor)             cmd_doctor "${ARGS[@]}" ;;
         update|self-update) cmd_update "${ARGS[@]}" ;;
         install)            cmd_install "${ARGS[@]}" ;;

@@ -18,6 +18,7 @@ source "${SCRIPT_LIB_DIR}/colors.sh"
 
 STEP_N=0
 STEP_TOTAL=0
+_IN_STEP=false
 _SPINNER_PID=""
 _ESC=$'\033'
 
@@ -108,6 +109,9 @@ _step_surface_notes() {
 # step_note <text>: shown under the step's result line (dimmed).
 step_note() { echo -e "${DIM}↳ $*${NC}"; }
 
+# in_step: running inside run_step (output is captured, step_note surfaces).
+in_step() { [[ "$_IN_STEP" == "true" ]]; }
+
 # run_step <label> <command...>: returns the command's exit code.
 run_step() {
     local label="$1" log start rc elapsed prefix
@@ -118,8 +122,10 @@ run_step() {
 
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         print_msg "${BOLD}${BLUE}▸${NC} ${prefix}${BOLD}${label}${NC}"
+        _IN_STEP=true
         "$@" </dev/null
         rc=$?
+        _IN_STEP=false
         elapsed="$(fmt_duration $((SECONDS - start)))"
         if [[ $rc -eq 0 ]]; then
             print_msg "${GREEN}${CHECKMARK}${NC} ${prefix}${label} ${DIM}${elapsed}${NC}"
@@ -137,8 +143,10 @@ run_step() {
         trap '_spinner_stop; ui_cursor_show; echo -e "${RED}${CROSSMARK}${NC} '"${prefix}${label}"' ${DIM}interrupted${NC}" >&2; exit 130' INT TERM
     fi
 
+    _IN_STEP=true
     "$@" >"$log" 2>&1 </dev/null
     rc=$?
+    _IN_STEP=false
 
     _spinner_stop
     trap - INT TERM

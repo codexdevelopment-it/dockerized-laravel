@@ -69,6 +69,41 @@ get_env_value() {
     printf '%s' "$line"
 }
 
+# EXIT handler shared by dock: releases the lock taken by acquire_lock and
+# shows the cursor again (steps hide it).
+_HELD_LOCK=""
+on_exit() {
+    [[ -n "$_HELD_LOCK" ]] && rm -rf "$_HELD_LOCK"
+    declare -F ui_cursor_show >/dev/null && ui_cursor_show
+    return 0
+}
+
+# acquire_lock <dir> <what>: one process at a time, via a lock dir holding the
+# owner's pid. Stale locks of dead processes are taken over; a lock already
+# owned by this pid (after `exec`) is kept. Released on exit.
+acquire_lock() {
+    local lock="$1" pid
+    mkdir -p "$(dirname "$lock")" || return 1
+    if ! mkdir "$lock" 2>/dev/null; then
+        pid="$(cat "${lock}/pid" 2>/dev/null)"
+        if [[ -n "$pid" && "$pid" != "$$" ]] && kill -0 "$pid" 2>/dev/null; then
+            print_error "Another ${2} is running (pid ${pid})"
+            return 1
+        fi
+        rm -rf "$lock" && mkdir "$lock" || return 1
+    fi
+    echo $$ > "${lock}/pid"
+    _HELD_LOCK="$lock"
+    trap on_exit EXIT
+}
+
+# lock_is_held <dir>: a live process owns the lock.
+lock_is_held() {
+    local pid
+    pid="$(cat "${1}/pid" 2>/dev/null)"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
 # human_size <bytes> -> 512 B | 1.4 MB
 human_size() {
     awk -v b="${1:-0}" 'BEGIN { split("B KB MB GB TB", u, " "); i = 1

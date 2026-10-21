@@ -121,8 +121,12 @@ reload_app_server() {
     return 0
 }
 
-# Shown at the end of start/deploy.
+# Shown at the end of start/deploy. Staging/production: the public APP_URL.
 app_url() {
+    if ! is_local_env && [[ -n "${APP_URL:-}" ]]; then
+        echo "$APP_URL"
+        return
+    fi
     case "${SERVER:-artisan}" in
         caddy)
             if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "localhost" ]]; then

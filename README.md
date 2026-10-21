@@ -65,7 +65,8 @@ Laravel     artisan|a · composer · npm · npx · node · php · exec [--root] 
             pint|format · migrate · fresh · seed
 Database    db · db:dump [file] · db:restore <file>
 Backups     backups enable · disable · status · run · list · download [sel] · restore [sel] · prune · logs
-Operations  deploy [-y] [--skip-pull] [--backup] · doctor · update [--check] · help [command]
+Operations  deploy [-y] [--skip-pull] [--backup] · autodeploy enable [--every N] · disable · status · logs
+            doctor · update [--check] · help [command]
 Global      -v/--verbose · -q/--quiet · -y/--yes · -e/--env <file> · --debug
 ```
 
@@ -242,7 +243,7 @@ DB_MOUNT_PATH=/srv/data/myapp/db
 
 What it does:
 
-1. `git fetch` the `BRANCH`, show commits/files to deploy (and flag new migrations), confirm.
+1. `git fetch` the `BRANCH`, show commits/files to deploy (and flag new migrations) and risky settings, confirm.
 2. `git pull --ff-only --autostash`, then continue with the freshly pulled `dock`.
 3. Write `USER_ID`/`GROUP_ID` and a missing `APP_KEY` to `.env`, `chmod 600 .env`, fix storage ownership.
 4. Optional `db:dump` (`--backup`), build the image, recreate containers.
@@ -252,6 +253,28 @@ What it does:
 7. Reload the server (opcache never revalidates in production) and `queue:restart`.
 
 It is idempotent: with no new commits it rebuilds and re-runs migrations. It exits non-zero if migrations fail.
+Only one deploy runs at a time (lock in `.git/dock/`).
+
+### Auto-deploy (optional)
+
+Let the server deploy every push to `BRANCH` by itself, from the host's cron:
+
+```bash
+./dock autodeploy enable            # every 2 minutes (AUTODEPLOY_INTERVAL)
+./dock autodeploy enable --every 5  # saves AUTODEPLOY_INTERVAL=5 to .env
+./dock autodeploy                   # status: cron, last check, last deploy, problems
+./dock autodeploy logs -f           # deploy output (.git/dock/autodeploy.log)
+./dock autodeploy disable
+```
+
+Each run does `git fetch origin BRANCH`; when origin is ahead it runs `./dock deploy -y` for the `APP_ENV`
+in `.env` (runs with nothing new write nothing). `enable` first checks that git can fetch the way cron
+will (no ssh-agent, no passphrase prompt): use a deploy key without passphrase. A deploy never overlaps
+another one, a failed deploy is not retried for the same commit (push a fix or run `./dock deploy`), and
+repeated problems (fetch failing, diverged checkout) are logged once. Until it is enabled, `./dock deploy`
+shows the command to enable it; `AUTODEPLOY=false` in `.env` hides that hint.
+
+> Anyone who can push to `BRANCH` deploys to the server, migrations included: protect the branch.
 
 ### HTTPS
 
@@ -264,8 +287,14 @@ ports 80/443 must be open. Behind another proxy, use `nginx`/`octane` and termin
 - DB, Redis, Mailpit, Meilisearch, phpMyAdmin, Gotenberg and FastCGI are published on `127.0.0.1` only —
   Docker port publishing bypasses `ufw`, so never set `SERVICES_BIND=0.0.0.0` on a public host. Use an SSH
   tunnel (`ssh -L 8080:127.0.0.1:8080 server`) for phpMyAdmin.
+- nginx and Caddy only hand `/index.php` to PHP: an uploaded `.php` in `public/storage` is never executed.
 - Container logs rotate (3 × 10 MB per container).
-- `./dock doctor` flags common production mistakes (`APP_DEBUG`, default passwords, `.env` permissions).
+- `start`, `deploy` and `doctor` warn about risky settings: `APP_DEBUG=true`, default or short
+  `DB_PASSWORD`, `DB_USERNAME=root`, DB/Redis/phpMyAdmin/FastCGI published on a non-loopback
+  `SERVICES_BIND`, default `MEILISEARCH_KEY` / Soketi secret, `MEILI_ENV`, Caddy without `DOMAIN`,
+  localhost `APP_URL`, `MAIL_HOST=mailpit`, `LOG_LEVEL=debug`, a `DB_PASSWORD` with `${`
+  (Laravel expands it, the database doesn't). Mount paths pointing at system directories, the project
+  root or each other are refused (deploy chowns `STORAGE_MOUNT_PATH` recursively).
 
 ## Backups
 
@@ -375,6 +404,7 @@ Start with `./dock doctor`.
 | `git fetch` fails on deploy | Add the server key as a deploy key |
 | Diverged checkout on deploy | Resolve by hand: deploy only fast-forwards |
 | Production page shows stale code | `./dock deploy --skip-pull -y` |
+| Auto-deploy does nothing | `./dock autodeploy status` (problem, last check); `./dock autodeploy logs` |
 | Backup upload failed | `./dock backups logs`; the file waits in `backups/pending/` and the next run retries it |
 | Cron backups never run | `./dock backups status`; check the cron service is running (`systemctl status cron`) |
 | Old setup: DB data in `docker/compose/db-data` | Still used automatically (dock warns); move it to `./db-data` when convenient |
