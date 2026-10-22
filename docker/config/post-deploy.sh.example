@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Post-deploy hook. Copy to post-deploy.sh (same folder) to enable it.
+#
+# `./dock deploy` runs it on the HOST, from the project root, as its last step,
+# with `bash` (no exec bit needed). A non-zero exit is a warning, not a failed
+# deploy; `./dock doctor`, the deploy preview and the final summary say whether
+# the script is in use and how its last run ended.
+#
+# Environment: PROJECT_ROOT, DOCK_BIN, DOCK_ENV, STORAGE_MOUNT_PATH,
+# DOCK_DEPLOY_FROM (commit before the deploy), DOCK_DEPLOY_TO (commit now).
+# Run container-side commands with "$DOCK_BIN" exec / "$DOCK_BIN" artisan.
+# Must be idempotent: it runs on every deploy.
+# =============================================================================
+set -euo pipefail
+cd "$PROJECT_ROOT"
+
+# Example: Passport refuses keys that are not 600/660, and `dock` resets the
+# storage permissions on every deploy.
+# "$DOCK_BIN" exec sh -c 'for k in storage/oauth-private.key storage/oauth-public.key; do [ ! -e "$k" ] || chmod 660 "$k"; done'

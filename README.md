@@ -261,6 +261,10 @@ What it does:
 7. Reload the server (opcache never revalidates in production) and `queue:restart`.
 8. Run the artisan commands listed in `docker/config/deploy-artisan.txt`, if any (e.g.
    `scout:sync-index-settings`).
+9. Run `docker/config/post-deploy.sh` on the host if it exists (copy `post-deploy.sh.example`): project
+   steps that must survive `dock update` (fixing key permissions, warming caches, notifying). A failure is a
+   warning. The deploy preview, the final summary, `doctor` and `autodeploy status` say explicitly
+   whether the script is in use and how its last run ended.
 
 It is idempotent: with no new commits it rebuilds and re-runs migrations. It exits non-zero if migrations fail.
 Only one deploy runs at a time (lock in `.git/dock/`).

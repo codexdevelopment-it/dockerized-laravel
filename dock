@@ -157,6 +157,7 @@ dock deploy [-y|--yes] [--skip-pull] [--backup]
       5. wait for the DB, migrate --force, storage:link, rebuild caches
       6. reload the app server, queue:restart
       7. artisan commands listed in docker/config/deploy-artisan.txt
+      8. docker/config/post-deploy.sh on the host, if present (failure = warning)
     --skip-pull   Deploy the working tree as-is
     --backup      db:dump before migrating
     Only one deploy runs at a time (lock in .git/dock/). To deploy every push
@@ -823,6 +824,11 @@ deploy_preview() {
     print_kv "URL" "$(app_url)"
     print_kv "Storage" "$(short_path "$STORAGE_MOUNT_PATH")"
     print_kv "DB data" "$(short_path "$DB_MOUNT_PATH")"
+    if post_deploy_exists; then
+        print_kv "Post-deploy" "docker/config/post-deploy.sh (will run last)"
+    else
+        print_kv "Post-deploy" "none (docker/config/post-deploy.sh not found)"
+    fi
 
     print_section "${ICON_PACKAGE} Changes"
     if [[ "$skip_pull" == "true" ]]; then
@@ -961,6 +967,38 @@ _deploy_artisan() {
     return $rc
 }
 
+# Project hook: docker/config/post-deploy.sh runs on the host, from the project
+# root, as the last deploy step. Run with bash (no exec bit needed). A failure
+# is a warning, not a failed deploy. Environment: PROJECT_ROOT, DOCK_BIN,
+# DOCK_ENV, APP_ENV, CONTAINER_NAME, STORAGE_MOUNT_PATH, DOCK_DEPLOY_FROM,
+# DOCK_DEPLOY_TO. Use "$DOCK_BIN" exec / artisan for container-side work.
+post_deploy_script() { echo "${PROJECT_ROOT}/docker/config/post-deploy.sh"; }
+post_deploy_state()  { echo "$(dock_state_dir)/post-deploy"; }
+post_deploy_exists() { [[ -f "$(post_deploy_script)" ]]; }
+
+post_deploy_record() {
+    mkdir -p "$(dock_state_dir)" || return 0
+    printf '%s %s %s\n' "$1" "$(git rev-parse --short HEAD 2>/dev/null)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$(post_deploy_state)"
+}
+
+_deploy_post_script() {
+    local script rc
+    script="$(post_deploy_script)"
+    echo "post-deploy hook: ${script#"${PROJECT_ROOT}"/}"
+    DOCK_DEPLOY_TO="$(git rev-parse --short HEAD 2>/dev/null)" \
+    DOCK_BIN="$DOCK_BIN" PROJECT_ROOT="$PROJECT_ROOT" \
+    DOCK_ENV="${DOCK_ENV:-}" STORAGE_MOUNT_PATH="${STORAGE_MOUNT_PATH:-}" \
+        bash "$script"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        post_deploy_record failed
+        print_warning "post-deploy.sh exited with ${rc} (run it by hand: bash docker/config/post-deploy.sh)"
+        return 1
+    fi
+    post_deploy_record ok
+    step_note "post-deploy.sh ran (ok)"
+}
+
 _deploy_migrate() {
     local out rc ran
     out="$(app_run php artisan migrate --force 2>&1)"
@@ -985,6 +1023,7 @@ deploy_run() {
     # prepare + [backup] + start_stack + [assets] + db + migrate + caches + [project commands]
     total=$(( 1 + $(start_stack_steps true false) + 3 ))
     [[ -n "$(deploy_artisan_commands)" ]] && total=$((total + 1))
+    post_deploy_exists && total=$((total + 1))
     [[ "$do_backup" == "true" ]] && total=$((total + 1))
     [[ "$sync_assets" == "true" ]] && total=$((total + 1))
 
@@ -1017,6 +1056,15 @@ deploy_run() {
     if [[ -n "$(deploy_artisan_commands)" ]]; then
         run_step "Project commands (deploy-artisan.txt)" _deploy_artisan || caches_ok=false
     fi
+    local hook_status="not used (no docker/config/post-deploy.sh)"
+    if post_deploy_exists; then
+        if run_step "Post-deploy script (docker/config/post-deploy.sh)" _deploy_post_script; then
+            hook_status="used: docker/config/post-deploy.sh ran ok"
+        else
+            hook_status="used: docker/config/post-deploy.sh FAILED"
+            caches_ok=false
+        fi
+    fi
     ui_cursor_show
 
     print_container_status
@@ -1026,10 +1074,10 @@ deploy_run() {
     fi
     autodeploy_record ok "$(git rev-parse HEAD 2>/dev/null)" "$([[ -n "${DOCK_AUTODEPLOY:-}" ]] && echo auto || echo manual)"
     if [[ "$caches_ok" == "true" ]]; then
-        print_done_box "Deployed" $(( $(date +%s) - started )) ok "Release|$(deploy_release_summary)"
+        print_done_box "Deployed" $(( $(date +%s) - started )) ok "Release|$(deploy_release_summary)" "Post-deploy|${hook_status}"
     else
         print_done_box "Deployed with warnings" $(( $(date +%s) - started )) warn \
-            "Release|$(deploy_release_summary)" "Warnings|a cache or project command failed, see above"
+            "Release|$(deploy_release_summary)" "Post-deploy|${hook_status}" "Warnings|a cache, project command or the post-deploy script failed, see above"
     fi
 }
 
@@ -1126,6 +1174,21 @@ cmd_doctor() {
         [[ -f "$(autodeploy_error)" ]] && _fail "$(cat "$(autodeploy_error)")"
         f="$(cut -d' ' -f1,2 "$(autodeploy_state)" 2>/dev/null)"
         [[ "$f" == "failed "* ]] && _fail "Last auto-deploy of ${f#failed } failed: ./dock autodeploy logs"
+    fi
+
+    print_section "Post-deploy script"
+    if post_deploy_exists; then
+        f="$(post_deploy_script)"
+        _ok "In use: ${f#"${PROJECT_ROOT}"/} (runs on the host as the last step of every deploy)"
+        bash -n "$f" 2>/dev/null && _ok "Syntax OK" || _fail "Syntax error: bash -n ${f#"${PROJECT_ROOT}"/}"
+        f="$(cat "$(post_deploy_state)" 2>/dev/null)"
+        case "$f" in
+            ok\ *)     _ok "Last deploy run: ok (${f#ok })" ;;
+            failed\ *) _fail "Last deploy run FAILED (${f#failed }): bash docker/config/post-deploy.sh" ;;
+            *)         _note "Not run yet (runs on the next ./dock deploy)" ;;
+        esac
+    else
+        _note "Not used (create docker/config/post-deploy.sh to run project steps after every deploy)"
     fi
 
     print_section "Runtime"

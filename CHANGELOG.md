@@ -19,6 +19,10 @@
   Redis persistence, extra volumes). The toolkit never ships it, so `dock update` keeps it.
 - `docker/config/deploy-artisan.txt`: artisan commands `./dock deploy` runs after migrations and caches
   (e.g. `scout:sync-index-settings`), one per line; failures are warnings.
+- `docker/config/post-deploy.sh`: optional project hook, run on the host as the last `./dock deploy` step
+  (failure = warning). Shipped as `post-deploy.sh.example`. Its use is logged explicitly: deploy preview,
+  step, final summary box, `doctor` (syntax + last run) and `autodeploy status`; last result in
+  `.git/dock/post-deploy`.
 - `APP_BIND` (e.g. `127.0.0.1`): publish the app port of `artisan`/`octane`/`nginx` on one interface
   only, for servers with a reverse proxy on the host. Unset keeps publishing on every interface.
 - Deploys take a lock (`.git/dock/deploy.lock`): a manual deploy and an auto-deploy never overlap.

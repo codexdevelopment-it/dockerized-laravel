@@ -78,6 +78,8 @@ docker/
 - Cron entries (backups, autodeploy) go through `cron.sh`: marker `# dock-<kind>:<PROJECT_ROOT>:`,
   paths checked by `cron_require_safe_paths`. Changing a cron line's format makes `status` report
   installed entries as out of date.
+- `docker/config/post-deploy.sh` (project-owned, host-side, run with `bash`) is the last deploy step; failure is a
+  warning. Its use must stay visible: preview, run_step, summary box, `doctor`, `autodeploy status`.
 - Deploy/autodeploy state lives in `.git/dock/` (never committed or in the image). `cmd_deploy` holds
   `deploy.lock` across its re-exec (same pid). `autodeploy run` must stay silent when nothing changes
   and log repeated problems once (it runs every couple of minutes).

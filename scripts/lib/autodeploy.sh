@@ -249,6 +249,12 @@ cmd_autodeploy_status() {
     else
         print_kv "Last deploy" "$(echo "$state" | awk '{ r = $1; c = substr($2, 1, 7); t = $3; $1 = $2 = $3 = ""; sub(/^ +/, ""); print r, c, "at", t, ($0 != "" ? "- " $0 : "") }')"
     fi
+    if post_deploy_exists; then
+        state="$(cat "$(post_deploy_state)" 2>/dev/null)"
+        print_kv "Post-deploy" "docker/config/post-deploy.sh in use (last run: ${state:-never})"
+    else
+        print_kv "Post-deploy" "not used"
+    fi
     [[ -f "$(autodeploy_error)" ]] && print_warning "$(cat "$(autodeploy_error)")"
     lock_is_held "$(deploy_lock)" && print_info "A deploy is running now"
     return 0
