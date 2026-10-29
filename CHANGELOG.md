@@ -49,6 +49,12 @@
 
 ### Fixed
 
+- Staging/production builds recompiled every PHP extension (several minutes) whenever the floating
+  `mlocati/php-extension-installer:2` or `composer:2` tags moved, which happens several times a week.
+  Both are now pinned (`PHP_EXT_INSTALLER_VERSION`, `COMPOSER_VERSION` build args in the Dockerfile),
+  and composer is copied in after the extension layer.
+- A code change no longer re-copies `vendor/` into the release image: vendor (minus the autoloader) is
+  its own layer, cached while `composer.lock` is unchanged.
 - `SERVER=octane` ignored `PHP_VERSION` for web requests: FrankenPHP's static binary embeds its own PHP
   (8.5 in 1.13.0) and extension set, while artisan, queues and the scheduler used `PHP_VERSION`. Octane
   images are now built on `dunglas/frankenphp:<FRANKENPHP_VERSION>-php<PHP_VERSION>-trixie`, so server

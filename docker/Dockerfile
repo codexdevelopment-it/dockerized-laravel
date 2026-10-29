@@ -28,10 +28,15 @@ ARG DEBIAN_RELEASE=trixie
 # (ZTS PHP + FrankenPHP linked against it): server, CLI and workers then run the
 # same PHP version with the same extensions.
 ARG PHP_BASE_IMAGE=php:${PHP_VERSION}-fpm-${DEBIAN_RELEASE}
+# Exact versions, not floating tags: when a tag moves (php-extension-installer
+# releases several times a week), every stage after the COPY is rebuilt,
+# including the extension compile in `base` (minutes).
+ARG PHP_EXT_INSTALLER_VERSION=2.12.3
+ARG COMPOSER_VERSION=2.10.3
 
 FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS node
-FROM composer:2 AS composer
-FROM mlocati/php-extension-installer:2 AS php-ext
+FROM composer:${COMPOSER_VERSION} AS composer
+FROM mlocati/php-extension-installer:${PHP_EXT_INSTALLER_VERSION} AS php-ext
 
 # -----------------------------------------------------------------------------
 # base: PHP + extensions + system tools. Shared by every other stage, so
@@ -46,7 +51,6 @@ ARG PHPREDIS_VERSION=6.3.0
 ARG LIBLZF_COMMIT=fb25820c3c0aeafd127956ae6c115063b47e459a
 
 COPY --from=php-ext /usr/bin/install-php-extensions /usr/local/bin/
-COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 # phpredis is built from its GitHub tag instead of PECL: pecl.php.net is
 # unreliable (HTTP 500/504 for hours) and broke image builds.
@@ -65,6 +69,9 @@ RUN apt-get update \
         ${PHP_EXTENSIONS} \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /usr/src/*
+
+# After the extension layer, so a composer bump doesn't recompile extensions.
+COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_NO_INTERACTION=1
@@ -188,7 +195,14 @@ RUN --mount=type=cache,target=/root/.composer/cache \
 # -----------------------------------------------------------------------------
 FROM app-base AS release
 
-COPY --from=builder --chown=laravel:www-data /var/www/html /var/www/html
+# vendor/ first, without the autoloader (it lists app classes and changes on
+# every build): when composer.lock is unchanged this layer stays cached, so a
+# code change doesn't re-copy and re-export the whole vendor tree.
+COPY --from=builder --chown=laravel:www-data --exclude=composer --exclude=autoload.php \
+    /var/www/html/vendor /var/www/html/vendor
+COPY --from=builder --chown=laravel:www-data --exclude=vendor /var/www/html /var/www/html
+COPY --from=builder --chown=laravel:www-data /var/www/html/vendor/composer /var/www/html/vendor/composer
+COPY --from=builder --chown=laravel:www-data /var/www/html/vendor/autoload.php /var/www/html/vendor/
 
 RUN mkdir -p storage/app/public storage/framework/cache storage/framework/sessions \
              storage/framework/views storage/logs bootstrap/cache \
